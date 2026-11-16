@@ -1,18 +1,27 @@
 # Nav2 Costmap_2d
 
+## 本地源码接口（2026-11-16）
+
+本包提供代价地图、Layer 与 CostmapFilter 插件。固定路径虽然不调用全局规划，Controller Server 仍使用 local_costmap 的位姿和有效性；激光代价图更新与 nav2_collision_monitor 的状态／速度过滤是不同链路。
+
+- 构建声明：[package.xml](package.xml) 、[CMakeLists.txt](CMakeLists.txt) 。
+- CMake 声明的运行目标：`nav2_costmap_2d_markers`、`nav2_costmap_2d_cloud`、`nav2_costmap_2d`；具体安装和启动条件见构建文件。
+- 插件导出：[costmap_plugins.xml](costmap_plugins.xml) ；共 9 个 class 声明，包括 `nav2_costmap_2d::InflationLayer`、`nav2_costmap_2d::ObstacleLayer`、`nav2_costmap_2d::StaticLayer`、`nav2_costmap_2d::VoxelLayer`。导出类与当前选中的插件 ID 分开核对。
+- 实现定位：[array_parser.cpp](src/array_parser.cpp) 、[costmap_2d.cpp](src/costmap_2d.cpp) 、[layer.cpp](src/layer.cpp) 。
+
 ## 当前项目用法
 
 组合静态、障碍、体素、膨胀等层及代价过滤器，为规划与控制提供环境代价。
 
-包类型：代价地图库与节点。包名和构建依赖见 [package.xml](package.xml)，安装目标见 [CMakeLists.txt](CMakeLists.txt)。
+包类型：代价地图库与节点。包名和构建依赖见 [package.xml](package.xml) ，安装目标见 [CMakeLists.txt](CMakeLists.txt) 。
 
-主要目录：[src/](src/)、[include/](include/)、[plugins/](plugins/)、[test/](test/)。
+主要目录：[src/](src/) 、[include/](include/) 、[plugins/](plugins/) 、[test/](test/) 。
 
 直接依赖（清单节选，完整约束见 manifest）：`angles`、`geometry_msgs`、`laser_geometry`、`map_msgs`、`message_filters`、`nav2_common`、`nav2_msgs`、`nav2_util`、`nav2_voxel_grid`、`nav_msgs`、`pluginlib`、`rclcpp` 等。
 
-插件声明：[costmap_plugins.xml](costmap_plugins.xml)。插件由对应宿主加载，插件类名以声明 XML 为准。
+插件声明：[costmap_plugins.xml](costmap_plugins.xml) 。插件由对应宿主加载，插件类名以声明 XML 为准。
 
-构建命令统一从 `nav2_ws` 执行，详见[仓库构建与包索引](../README.md)；不在包源码目录运行 colcon。本文依据当前源码描述职责，包存在、可构建或包含测试文件均不代表完成运行验收。
+构建命令统一从 `nav2_ws` 执行，详见[仓库构建与包索引](../README.md) ；不在包源码目录运行 colcon。本文依据当前源码描述职责，包存在、可构建或包含测试文件均不代表完成运行验收。
 
 ## 原有说明与上游资料
 

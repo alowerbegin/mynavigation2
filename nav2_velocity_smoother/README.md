@@ -1,12 +1,20 @@
 # Velocity Smoother
 
+## 本地源码接口（2026-11-16）
+
+项目使用 MotionState 闭环；模式覆盖后的名义频率为 autonomous 50 Hz、fixed_path／autonomous_fixed 100 Hz。默认 fixed_path 的正常纵向加／减速度幅值不超过 0.3 m/s²、jerk 不超过 1.0 m/s³；统一出口接管／故障零速不经过正常导航平滑斜坡。
+
+- 构建声明：[package.xml](package.xml) 、[CMakeLists.txt](CMakeLists.txt) 。
+- CMake 声明的运行目标：`velocity_smoother`；具体安装和启动条件见构建文件。
+- 实现定位：[velocity_smoother.cpp](src/velocity_smoother.cpp) 、[main.cpp](src/main.cpp) 。
+
 ## 当前项目用法
 
 处理控制速度输入，执行开环／闭环平滑及本项目可选 jerk 限制与 collision 目标门控。
 
-包类型：速度平滑节点。包名和构建依赖见 [package.xml](package.xml)，安装目标见 [CMakeLists.txt](CMakeLists.txt)。
+包类型：速度平滑节点。包名和构建依赖见 [package.xml](package.xml) ，安装目标见 [CMakeLists.txt](CMakeLists.txt) 。
 
-主要目录：[src/](src/)、[include/](include/)、[test/](test/)。
+主要目录：[src/](src/) 、[include/](include/) 、[test/](test/) 。
 
 直接依赖（清单节选，完整约束见 manifest）：`geometry_msgs`、`nav2_common`、`nav2_util`、`rclcpp`、`rclcpp_components`、`spdlog_wrapper`、`std_msgs`。
 
@@ -14,7 +22,7 @@
 
 本项目 YAML 启用 `jerk_limited_smoothing`，通用节点内置默认仍为 false。固定路径 collision 门控位于 S 曲线目标生成前；初始未收到状态为 4，收到后达到 0.5 秒超时按 0 处理。`/motion_state` 使用 MotionState 的 `v_car/w_car`；Odometry 类型反馈从 twist 读取。目标限速不等于实际速度瞬时跳变，配置改变需生命周期重新配置。
 
-构建命令统一从 `nav2_ws` 执行，详见[仓库构建与包索引](../README.md)；不在包源码目录运行 colcon。本文依据当前源码描述职责，包存在、可构建或包含测试文件均不代表完成运行验收。
+构建命令统一从 `nav2_ws` 执行，详见[仓库构建与包索引](../README.md) ；不在包源码目录运行 colcon。本文依据当前源码描述职责，包存在、可构建或包含测试文件均不代表完成运行验收。
 
 ## 原有说明与上游资料
 

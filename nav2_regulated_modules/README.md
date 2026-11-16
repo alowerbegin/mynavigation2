@@ -1,5 +1,16 @@
 # nav2_regulated_modules
 
+## 本地源码接口（2026-11-16）
+
+直接入口默认 fixed_path，接受 NavigationService 和后台 ChassisControl；统一出口在本导航器中仲裁。autonomous 支持重规划，autonomous_fixed 只规划一次后冻结分段执行，remote 为键盘直控。模式选择、后台控制权交接和生命周期是三种不同状态。
+
+- 构建声明：[package.xml](package.xml) 、[CMakeLists.txt](CMakeLists.txt) 。
+- CMake 声明的运行目标：`regulated_navigator_node`、`velocity_diagnostics_node`、`collision_boundary_visualizer_node`；具体安装和启动条件见构建文件。
+- 安装脚本：[collision_action_test.py](tools/collision_action_test.py) 。脚本安装不等于入口自动执行。
+- 插件导出：[autonomous_controller_plugin.xml](autonomous_controller_plugin.xml) 、[autonomous_fixed_controller_plugin.xml](autonomous_fixed_controller_plugin.xml) 、[autonomous_fixed_planner_plugin.xml](autonomous_fixed_planner_plugin.xml) 、[fixed_path_controller_plugin.xml](fixed_path_controller_plugin.xml) ；共 6 个 class 声明，包括 `nav2_regulated_modules::AutonomousMPPIController`、`nav2_regulated_modules::AutonomousStoppedGoalChecker`、`nav2_regulated_modules::AutonomousFixedPathController`、`nav2_regulated_modules::AutonomousFixedHybridPlanner`。导出类与当前选中的插件 ID 分开核对。
+- 实现定位：[chassis_control_authority.cpp](src/chassis_control_authority.cpp) 、[navigator_fixed_path.cpp](src/navigator_fixed_path.cpp) 、[navigator_control.cpp](src/navigator_control.cpp) 。
+- 启动资源：[regulated_modules.launch.py](launch/regulated_modules.launch.py) 、[rviz_launch.py](launch/rviz_launch.py) ；启动参数由对应文件声明。
+
 ## 职责与结构
 
 推荐的规控统一入口，提供无 BT 任务协调、规划／平滑／控制客户端、专用固定路径控制器、目标检查器、速度诊断与碰撞区域可视化。仿真世界和传感器桥接由场景包负责，外部定位、激光、轮速和底盘通信需另行提供。
@@ -8,13 +19,13 @@
 |---|---|
 | [launch/](launch/) | `regulated_modules.launch.py` 与 RViz 入口 |
 | [params/regulated_modules.yaml](params/regulated_modules.yaml) | 节点参数、规划／控制插件和反馈话题 |
-| [src/](src/)／[include/](include/) | 协调器、规划与控制模块、固定路径跟踪与停止逻辑 |
+| [src/](src/) ／[include/](include/) | 协调器、规划与控制模块、固定路径跟踪与停止逻辑 |
 | [fixed_path_controller_plugin.xml](fixed_path_controller_plugin.xml) | `nav2_regulated_modules::FixedPathController` 与 `FixedPathGoalChecker` |
 | [autonomous_controller_plugin.xml](autonomous_controller_plugin.xml) | 仅自主配置选择的 MPPI 转向／接近包装和连续停稳 GoalChecker |
-| [tools/README.md](tools/README.md)／[test/](test/) | 现有环境观察、隔离实验及开发验证 |
+| [tools/README.md](tools/README.md) ／[test/](test/) | 现有环境观察、隔离实验及开发验证 |
 | [doc/](doc/) | 架构、日志与分开验收方法 |
 
-依赖标准 Nav2 服务器、插件、`byd_custom_msgs`、`controlpub`、`myagv_keyboard_control` 及 ROS 2 通信库，完整依赖见 [package.xml](package.xml)，安装可执行目标见 [CMakeLists.txt](CMakeLists.txt)。
+依赖标准 Nav2 服务器、插件、`byd_custom_msgs`、`controlpub`、`myagv_keyboard_control` 及 ROS 2 通信库，完整依赖见 [package.xml](package.xml) ，安装可执行目标见 [CMakeLists.txt](CMakeLists.txt) 。
 
 ## 构建与启动
 
@@ -69,7 +80,7 @@ test -r "$MAP_FILE"
 
 ### remote：键盘直控
 
-无需导航 Action 或地图规划，在可交互终端运行。按键、终端设备和停车行为见[键盘包 README](../myagv_keyboard_control/README.md#三运行方法)。
+无需导航 Action 或地图规划，在可交互终端运行。按键、终端设备和停车行为见[键盘包 README](../myagv_keyboard_control/README.md#三运行方法) 。
 
 ```bash
 ros2 launch nav2_regulated_modules regulated_modules.launch.py \
@@ -100,7 +111,7 @@ ros2 launch nav2_regulated_modules regulated_modules.launch.py \
 
 默认使用项目 Hybrid 包装、REEDS_SHEPP、10 m 距离查表和专用固定路径执行链。接收单点 Action 或 RViz 单点目标，拒绝 NavigateThroughPoses、NavigationService 和非空 `behavior_tree`。
 
-沿途由控制包装统一处理 TF 延迟，默认可用年龄上限 0.6 s；首次起步、旋转和终点附近仍按 0.3 s 严格检查。短暂停保留同一 FollowPath，连续失效计时与恢复稳定计时分开，导航器不重复发 TF 停车请求。参数及失效边界见 [暂停恢复说明](doc/autonomous_fixed_architecture.md#完成与暂停)；这不代表可脱离定位运行，实车连续性与终点精度仍需新日志验收。
+沿途由控制包装统一处理 TF 延迟，默认可用年龄上限 0.6 s；首次起步、旋转和终点附近仍按 0.3 s 严格检查。短暂停保留同一 FollowPath，连续失效计时与恢复稳定计时分开，导航器不重复发 TF 停车请求。参数及失效边界见 [暂停恢复说明](doc/autonomous_fixed_architecture.md#完成与暂停) ；这不代表可脱离定位运行，实车连续性与终点精度仍需新日志验收。
 
 ```bash
 ros2 launch nav2_regulated_modules regulated_modules.launch.py \
@@ -110,7 +121,7 @@ ros2 launch nav2_regulated_modules regulated_modules.launch.py \
 
 ## 仿真入口与实车入口的区别
 
-完整的四模式仿真命令见 [myworld_bringup README](../myworld_bringup/README.md#四种模式的仿真启动)。场景入口负责 Gazebo、传感器桥接、速度反馈转换与机器人内部 TF，外部定位仍需另行启动；默认 `use_sim_time=false`、`headless=true`。不要同时再启动一份本包规控入口。
+完整的四模式仿真命令见 [myworld_bringup README](../myworld_bringup/README.md#四种模式的仿真启动) 。场景入口负责 Gazebo、传感器桥接、速度反馈转换与机器人内部 TF，外部定位仍需另行启动；默认 `use_sim_time=false`、`headless=true`。不要同时再启动一份本包规控入口。
 
 已有独立仿真及外部定位时，也可使用上面的直接规控命令，但须自行提供匹配的传感器、TF、反馈和参数文件，不能默认其配置与场景入口相同。场景 autonomous 使用 SmacHybrid／REEDS_SHEPP＋专用 MPPI，直接 autonomous 默认 SmacHybrid／DUBIN＋RPP；fixed_path 和 autonomous_fixed 也有模式专属的参数重写。场景入口的 `use_gazebo:=false` 仅关闭仿真及桥接，仍保留场景模型与参数，不自动切换为实车共享 YAML。
 
@@ -154,7 +165,7 @@ rviz2 -d "$(ros2 pkg prefix --share nav2_regulated_modules)/rviz/nav2_default_vi
 
 在 `autonomous`／`autonomous_fixed` 中，将 Fixed Frame 设为 `map`，确认定位与生命周期就绪，再用工具栏 `Nav2 Goal` 点击目标并拖动终点方向。当前工具经 Nav2 面板发送 NavigateToPose；autonomous_fixed 不使用多点／waypoint 工作流。fixed_path 的 RViz 用于看业务路径，不把 Nav2 Goal 当作 NavigationService；remote 不下发导航目标。`2D Pose Estimate` 是否被采用取决于外部定位实现，不替代启动定位模块。
 
-如需随导航打开 RViz，改用 `use_rviz:=true`，直接入口默认按模式选取本包配置，自定义文件使用 `rviz_config_file:=/absolute/path/view.rviz`；该 Launch 的 RViz 子入口没有传递 `use_sim_time`，因此仿真时钟场景优先使用上面的独立命令显式设置时间。场景入口自带 RViz 会传入所选时间参数，场景模式配置见[场景 README](../myworld_bringup/README.md#仿真-rviz2-与时间设置)。独立进程退出不触发导航 Launch 的 RViz 退出事件；直接规控内置 RViz 的现有退出联动保持。
+如需随导航打开 RViz，改用 `use_rviz:=true`，直接入口默认按模式选取本包配置，自定义文件使用 `rviz_config_file:=/absolute/path/view.rviz`；该 Launch 的 RViz 子入口没有传递 `use_sim_time`，因此仿真时钟场景优先使用上面的独立命令显式设置时间。场景入口自带 RViz 会传入所选时间参数，场景模式配置见[场景 README](../myworld_bringup/README.md#仿真-rviz2-与时间设置) 。独立进程退出不触发导航 Launch 的 RViz 退出事件；直接规控内置 RViz 的现有退出联动保持。
 
 ## Action 下发与结果检查
 
@@ -208,13 +219,13 @@ ros2 action send_goal --feedback /navigation_service \
   "{task_id: 'readme_line_001', navi_segment: [{segment_type: 1, segment_name: 'line', segment_id: 'segment_001', node1: {x: $START_X, y: $START_Y, z: 0.0}, node2: {x: $END_X, y: $END_Y, z: 0.0}, max_speed: 0.20, motion_direction: 1}]}"
 ```
 
-类型与字段以 [NavigationService.action](../byd_custom_msgs/action/NavigationService.action)、[NaviSegment.msg](../byd_custom_msgs/msg/NaviSegment.msg)、[NavigateToPose.action](../nav2_msgs/action/NavigateToPose.action)、[NavigateThroughPoses.action](../nav2_msgs/action/NavigateThroughPoses.action) 为准。三次贝塞尔还需控制点，历史几何例子保留在[场景固定路径任务](../myworld_bringup/README.md#固定路径任务)，不作为当前地图的默认路线。
+类型与字段以 [NavigationService.action](../byd_custom_msgs/action/NavigationService.action) 、[NaviSegment.msg](../byd_custom_msgs/msg/NaviSegment.msg) 、[NavigateToPose.action](../nav2_msgs/action/NavigateToPose.action) 、[NavigateThroughPoses.action](../nav2_msgs/action/NavigateThroughPoses.action) 为准。三次贝塞尔还需控制点，历史几何例子保留在[场景固定路径任务](../myworld_bringup/README.md#固定路径任务) ，不作为当前地图的默认路线。
 
 ### 反馈、取消与停稳
 
 `Goal accepted` 只表示接收，需继续等 `SUCCEEDED`、`ABORTED` 或 `CANCELED`。标准导航反馈有当前位置、剩余距离、耗时与预计剩余时间；多点另有剩余目标数。NavigationService 反馈为 `cur_task_id`、`cur_seg_id`、`progress`，成功结果还应核对 `finish`，不能混用两种协议。
 
-本机 Humble 的 `ros2 action send_goal` 在 Goal 被接受后注册 SIGINT 处理器，原终端 `Ctrl+C` 会请求取消该 Goal。等待取消结果并确认 `/motion_state` 的实际速度停稳；关闭终端、断开客户端或取消请求被接受本身都不证明已经停稳。跨终端按 UUID 取消的方法见[仓库 README](../README.md#结果判断与取消任务)，NavigationService 使用自己的 UUID 和 `/navigation_service/_action/cancel_goal`，不使用全零 UUID 取消全部任务。RViz 面板的取消按钮针对其自己持有的任务句柄，不视为任意外部 Action 的全局停止按钮。
+本机 Humble 的 `ros2 action send_goal` 在 Goal 被接受后注册 SIGINT 处理器，原终端 `Ctrl+C` 会请求取消该 Goal。等待取消结果并确认 `/motion_state` 的实际速度停稳；关闭终端、断开客户端或取消请求被接受本身都不证明已经停稳。跨终端按 UUID 取消的方法见[仓库 README](../README.md#结果判断与取消任务) ，NavigationService 使用自己的 UUID 和 `/navigation_service/_action/cancel_goal`，不使用全零 UUID 取消全部任务。RViz 面板的取消按钮针对其自己持有的任务句柄，不视为任意外部 Action 的全局停止按钮。
 
 ## 数据流与反馈
 
@@ -259,13 +270,13 @@ fixed_path：/cmd_vel → 导航器内统一出口 → /control_to_uart
 
 ## 固定路径与终点行为
 
-- [NavigationService](../byd_custom_msgs/action/NavigationService.action) 接收 `task_id` 和 [NaviSegment[]](../byd_custom_msgs/msg/NaviSegment.msg)。支持直线与三次贝塞尔；相邻段连续，同一 Action 所有段同方向。
+- [NavigationService](../byd_custom_msgs/action/NavigationService.action) 接收 `task_id` 和 [NaviSegment[]](../byd_custom_msgs/msg/NaviSegment.msg) 。支持直线与三次贝塞尔；相邻段连续，同一 Action 所有段同方向。
 - `max_speed` 为有限正数，所有段取最小值，再受 `fixed_path_max_speed=1.5` 限制。方向 1／2 分别生成前进／倒车车体姿态和正／负速度，不修改初始定位或 Gazebo 位姿。
 - 起点总距离上限 1.2 m；首次横向误差决定直接跟踪或严格对齐策略。横向误差较小时仍需满足航向条件才进入直线跟踪，大航向误差可能先原地转向；收到 Action 不代表立即达速。
 - 每条路径起步保护距离默认 0.5 m，速度上限 0.3 m/s；横向和航向误差满足条件并稳定后解除，当前 YAML 的释放航向门限为 20°、稳定周期 10。
 - 当前项目 YAML 的停车入口 0.008 m 与目标检查器位置容差 0.01 m 分开；位置／终点平面及停稳参与终点判断，终点航向作诊断。内部成功不等于独立地图精度或实车精度通过。
 
-启动与 Action 几何例子见[仿真入口说明](../myworld_bringup/README.md)；控制实现见 [fixed_path_controller.cpp](src/fixed_path_controller.cpp) 与 [fixed_path_goal_checker.cpp](src/fixed_path_goal_checker.cpp)。
+启动与 Action 几何例子见[仿真入口说明](../myworld_bringup/README.md) ；控制实现见 [fixed_path_controller.cpp](src/fixed_path_controller.cpp) 与 [fixed_path_goal_checker.cpp](src/fixed_path_goal_checker.cpp) 。
 
 ## collision 状态与 Collision Monitor
 
@@ -297,7 +308,7 @@ ros2 launch myworld_bringup entry.launch.py \
   use_collision_velocity_gate:=false
 ```
 
-实车雷达话题须按实际部署设置。状态链仍需有效雷达、TF 和 `/motion_state`；生产环境由上层发布正确的 `/car_op_status`，不能把默认状态 0 当作自动判断方向／载货。当前本地 autonomous_fixed 的 footprint 保持 1.2×0.9 m、膨胀半径 0.4 m；检测脚本 real 档车体为 1.2×0.8 m，自车点滤除默认外扩 0.05 m。车体尺寸、导航安全外廓及滤除范围用途不同，部署前分别核对。完整说明见[碰撞状态链](../nav2_collision_monitor/doc/OBSTACLE_STATUS.md)。
+实车雷达话题须按实际部署设置。状态链仍需有效雷达、TF 和 `/motion_state`；生产环境由上层发布正确的 `/car_op_status`，不能把默认状态 0 当作自动判断方向／载货。当前本地 autonomous_fixed 的 footprint 保持 1.2×0.9 m、膨胀半径 0.4 m；检测脚本 real 档车体为 1.2×0.8 m，自车点滤除默认外扩 0.05 m。车体尺寸、导航安全外廓及滤除范围用途不同，部署前分别核对。完整说明见[碰撞状态链](../nav2_collision_monitor/doc/OBSTACLE_STATUS.md) 。
 
 | 有效状态 | 含义 | 相对任务速度上限 |
 |---|---|---:|
@@ -316,7 +327,7 @@ ros2 launch myworld_bringup entry.launch.py \
 ros2 topic pub --rate 50 /collision_state std_msgs/msg/UInt8 '{data: 4}'
 ```
 
-周期例子见 [COLLISION_TEST.md](tools/COLLISION_TEST.md)：50 Hz 发布 `4→3→2→1→0`，默认保持 4／3／3／3／3 秒；请求 1.5 m/s，支持去程前进、返程倒车。有限运行示例（先核对地图端点与起步位姿）：
+周期例子见 [COLLISION_TEST.md](tools/COLLISION_TEST.md) ：50 Hz 发布 `4→3→2→1→0`，默认保持 4／3／3／3／3 秒；请求 1.5 m/s，支持去程前进、返程倒车。有限运行示例（先核对地图端点与起步位姿）：
 
 ```bash
 ros2 run nav2_regulated_modules collision_action_test.py \
@@ -330,11 +341,13 @@ ros2 run nav2_regulated_modules collision_action_test.py \
 
 统一速度诊断默认开启：自主模式文件快照 50 Hz、固定路径／remote 100 Hz，终端摘要 1 Hz；默认日志目录 `/tmp/nav2_logs`，可通过 `log_dir` 改到数据盘。`ROS_LOG_DIR` 管理 ROS Launch 日志，两者独立。`enable_legacy_velocity_logs=false` 默认抑制重复摘要，关闭统一诊断后回退旧记录。
 
-- [速度日志](doc/velocity_logging.md)：字段、异步滚动、S 曲线及缺失／过期状态。
-- [固定路径 TF 诊断](doc/tf_diagnostics.md)：map→base_link 默认 100 Hz 采样打印、直接边逐条接收打印、控制器消费记录及逐边／时钟摘要。
-- [固定路径架构](doc/fixed_path_architecture.md)：既有模块与控制流程分析，其中旧的 Collision Monitor 默认开启描述以本 README 的当前默认表为准。
-- [分开验收](doc/action_only_acceptance.md)：速度停稳与定位采样质量分开评价。
-- [测试工具](tools/README.md)：工具运行前提及会修改环境的实验边界。
+速度快照仍在首次实际收到 ChassisControl 后才开始，导航任务执行本身不触发这个门控。fixed_path 中发一帧零速也会请求遥控接管并取消旧路径，不能在任务执行中仅为触发日志而随意发布该消息；TF 诊断和任务事件日志采用各自的原开关。
+
+- [速度日志](doc/velocity_logging.md) ：字段、异步滚动、S 曲线及缺失／过期状态。
+- [固定路径 TF 诊断](doc/tf_diagnostics.md) ：map→base_link 默认 100 Hz 采样打印、直接边逐条接收打印、控制器消费记录及逐边／时钟摘要。
+- [固定路径架构](doc/fixed_path_architecture.md) ：既有模块与控制流程分析，其中旧的 Collision Monitor 默认开启描述以本 README 的当前默认表为准。
+- [分开验收](doc/action_only_acceptance.md) ：速度停稳与定位采样质量分开评价。
+- [测试工具](tools/README.md) ：工具运行前提及会修改环境的实验边界。
 
 本文为当前源码静态说明。本轮文档更新不执行构建或运动。已有隔离真实节点＋合成反馈回归不等同于实车验收；现有短路线周期测试只取得部分减速／停止证据，独立状态源启停验收因起步转向占满 5 秒基准窗而 UNAVAILABLE，不能声称两程全部通过。动态验证记录由外层项目 ROADMAP 与报告维护。
 

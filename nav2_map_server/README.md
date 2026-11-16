@@ -1,18 +1,27 @@
 # Map Server
 
+## 本地源码接口（2026-11-16）
+
+map_server 提供静态 OccupancyGrid，map_saver_cli／map_saver_server 保存地图，costmap_filter_info_server 提供过滤器信息。地图发布本身不产生 map→base_link 定位 TF，当前外部定位入口仍需独立定位系统。
+
+- 构建声明：[package.xml](package.xml) 、[CMakeLists.txt](CMakeLists.txt) 。
+- CMake 声明的运行目标：`map_server`、`map_saver_cli`、`map_saver_server`、`costmap_filter_info_server`；具体安装和启动条件见构建文件。
+- 实现定位：[main.cpp](src/map_server/main.cpp) 、[main_cli.cpp](src/map_saver/main_cli.cpp) 、[main_server.cpp](src/map_saver/main_server.cpp) 。
+- 启动资源：[map_saver_server.launch.py](launch/map_saver_server.launch.py) ；启动参数由对应文件声明。
+
 ## 当前项目用法
 
 提供地图加载、发布、保存及 Costmap Filter 信息服务。
 
-包类型：地图服务节点。包名和构建依赖见 [package.xml](package.xml)，安装目标见 [CMakeLists.txt](CMakeLists.txt)。
+包类型：地图服务节点。包名和构建依赖见 [package.xml](package.xml) ，安装目标见 [CMakeLists.txt](CMakeLists.txt) 。
 
-主要目录：[src/](src/)、[include/](include/)、[launch/](launch/)、[test/](test/)。
+主要目录：[src/](src/) 、[include/](include/) 、[launch/](launch/) 、[test/](test/) 。
 
 直接依赖（清单节选，完整约束见 manifest）：`graphicsmagick`、`launch_ros`、`launch_testing`、`nav2_common`、`nav2_msgs`、`nav2_util`、`nav_msgs`、`rclcpp`、`rclcpp_lifecycle`、`spdlog_wrapper`、`std_msgs`、`tf2` 等。
 
-启动资源：[map_saver_server.launch.py](launch/map_saver_server.launch.py)。执行前先加载工作空间环境，具体依赖由所选入口决定。
+启动资源：[map_saver_server.launch.py](launch/map_saver_server.launch.py) 。执行前先加载工作空间环境，具体依赖由所选入口决定。
 
-构建命令统一从 `nav2_ws` 执行，详见[仓库构建与包索引](../README.md)；不在包源码目录运行 colcon。本文依据当前源码描述职责，包存在、可构建或包含测试文件均不代表完成运行验收。
+构建命令统一从 `nav2_ws` 执行，详见[仓库构建与包索引](../README.md) ；不在包源码目录运行 colcon。本文依据当前源码描述职责，包存在、可构建或包含测试文件均不代表完成运行验收。
 
 ## 原有说明与上游资料
 

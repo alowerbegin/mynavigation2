@@ -1,5 +1,13 @@
 # controlpub
 
+## 本地源码接口（2026-11-16）
+
+autonomous／autonomous_fixed 仍使用本转发节点；fixed_path 的统一出口位于 regulated_navigator 内，不启动 controlpub。额外启动本节点会形成竞争发布者；它自身仅按有效输入转发，没有输入断流停车定时器。
+
+- 构建声明：[package.xml](package.xml) 、[CMakeLists.txt](CMakeLists.txt) 。
+- CMake 声明的运行目标：`controlpub_node`；具体安装和启动条件见构建文件。
+- 实现定位：[controlpub_node.cpp](src/controlpub_node.cpp) 。
+
 ## 职责与接口
 
 将 `geometry_msgs/msg/Twist` 的 `linear.x/angular.z` 转为 `byd_custom_msgs/msg/ControlRes` 的 `v/w`；`v_lift`、`w_rotation` 固定为 0。这里只发布 ROS 消息，实际串口发送由外部通信程序负责。
@@ -24,4 +32,4 @@ source install/local_setup.bash
 ros2 run controlpub controlpub_node
 ```
 
-规控和相应仿真入口已管理本节点时，不重复启动。源码见 [controlpub_node.cpp](src/controlpub_node.cpp)，构建与依赖见 [CMakeLists.txt](CMakeLists.txt)、[package.xml](package.xml)。速度链与单一输出来源说明见[规控包](../nav2_regulated_modules/README.md)。
+当前直接规控和 `myworld_bringup` 的 fixed_path 使用导航器内统一出口，该模式不启动本节点；手动追加本节点会形成额外 `/control_to_uart` 发布者并触发固定路径保护。其他导航模式仍由入口管理本节点。源码见 [controlpub_node.cpp](src/controlpub_node.cpp) ，构建与依赖见 [CMakeLists.txt](CMakeLists.txt) 、[package.xml](package.xml) 。速度链与单一输出来源说明见[规控包](../nav2_regulated_modules/README.md) 。

@@ -1,20 +1,28 @@
 # Nav2 Rotation Shim Controller
 
+## 本地源码接口（2026-11-16）
+
+RotationShimController 在需要时先做朝向对齐，再交给 primary_controller。项目 autonomous 的专用包装有自身对齐／终点策略，不能从共享 YAML 注册了 RotationShimController 推断它在所有模式中生效。
+
+- 构建声明：[package.xml](package.xml) 、[CMakeLists.txt](CMakeLists.txt) 。
+- 插件导出：[nav2_rotation_shim_controller.xml](nav2_rotation_shim_controller.xml) ；共 1 个 class 声明，类型为 `nav2_rotation_shim_controller::RotationShimController`。导出类与当前选中的插件 ID 分开核对。
+- 实现定位：[nav2_rotation_shim_controller.cpp](src/nav2_rotation_shim_controller.cpp) 。
+
 ## 当前项目用法
 
 在需要时先对齐路径朝向，再把控制交给配置的内部控制器。
 
-包类型：控制插件。包名和构建依赖见 [package.xml](package.xml)，安装目标见 [CMakeLists.txt](CMakeLists.txt)。
+包类型：控制插件。包名和构建依赖见 [package.xml](package.xml) ，安装目标见 [CMakeLists.txt](CMakeLists.txt) 。
 
-主要目录：[src/](src/)、[include/](include/)、[test/](test/)。
+主要目录：[src/](src/) 、[include/](include/) 、[test/](test/) 。
 
 直接依赖（清单节选，完整约束见 manifest）：`angles`、`geometry_msgs`、`nav2_common`、`nav2_controller`、`nav2_core`、`nav2_costmap_2d`、`nav2_msgs`、`nav2_util`、`pluginlib`、`rclcpp`、`tf2`。
 
-插件声明：[nav2_rotation_shim_controller.xml](nav2_rotation_shim_controller.xml)。插件由对应宿主加载，插件类名以声明 XML 为准。
+插件声明：[nav2_rotation_shim_controller.xml](nav2_rotation_shim_controller.xml) 。插件由对应宿主加载，插件类名以声明 XML 为准。
 
 使用方式：在宿主服务器的插件列表和参数块中配置导出的类；仅构建本包不会自动切换当前运行控制器或规划器。
 
-构建命令统一从 `nav2_ws` 执行，详见[仓库构建与包索引](../README.md)；不在包源码目录运行 colcon。本文依据当前源码描述职责，包存在、可构建或包含测试文件均不代表完成运行验收。
+构建命令统一从 `nav2_ws` 执行，详见[仓库构建与包索引](../README.md) ；不在包源码目录运行 colcon。本文依据当前源码描述职责，包存在、可构建或包含测试文件均不代表完成运行验收。
 
 ## 原有说明与上游资料
 

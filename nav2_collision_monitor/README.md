@@ -1,26 +1,46 @@
 # Nav2 Collision Monitor
 
+## 本地源码接口（2026-11-16）
+
+当前源码同时提供 Nav2 速度过滤节点与独立状态工具。use_collision_monitor 在项目入口表示状态检测链总开关，use_collision_velocity_gate 才表示速度门；排除区和速度分档多边形属于本包 C++ 输入处理，UInt8 状态门控由规控／控制／平滑链消费。
+
+- 构建声明：[package.xml](package.xml) 、[CMakeLists.txt](CMakeLists.txt) 。
+- CMake 声明的运行目标：`collision_monitor`；具体安装和启动条件见构建文件。
+- 安装脚本：[car_op_status_sim.py](tools/car_op_status_sim.py) 、[car_op_zones.py](tools/car_op_zones.py) 、[obstacle_status_translator.py](tools/obstacle_status_translator.py) 。脚本安装不等于入口自动执行。
+- 实现定位：[source.cpp](src/source.cpp) 、[exclusion_zone.cpp](src/exclusion_zone.cpp) 、[obstacle_status_translator.py](tools/obstacle_status_translator.py) 。
+- 启动资源：[collision_monitor_node.launch.py](launch/collision_monitor_node.launch.py) 、[obstacle_status.launch.py](launch/obstacle_status.launch.py) ；启动参数由对应文件声明。
+
 ## 当前项目用法
 
 依据 LaserScan、PointCloud2、Range 等传感器与配置区域，对输入速度实施停车、减速或接近保护。
 
-包类型：速度过滤节点。包名和构建依赖见 [package.xml](package.xml)，安装目标见 [CMakeLists.txt](CMakeLists.txt)。
+包类型：速度过滤节点。包名和构建依赖见 [package.xml](package.xml) ，安装目标见 [CMakeLists.txt](CMakeLists.txt) 。
 
-主要目录：[src/](src/)、[include/](include/)、[launch/](launch/)、[params/](params/)、[test/](test/)。
+主要目录：[src/](src/) 、[include/](include/) 、[launch/](launch/) 、[params/](params/) 、[test/](test/) 。
 
 直接依赖（清单节选，完整约束见 manifest）：`geometry_msgs`、`libpcl-all`、`libpcl-all-dev`、`nav2_common`、`nav2_costmap_2d`、`nav2_util`、`rclcpp`、`rclcpp_components`、`sensor_msgs`、`tf2`、`tf2_geometry_msgs`、`tf2_ros`。
 
-启动资源：[collision_monitor_node.launch.py](launch/collision_monitor_node.launch.py)。执行前先加载工作空间环境，具体依赖由所选入口决定。
+启动资源：[collision_monitor_node.launch.py](launch/collision_monitor_node.launch.py) 。执行前先加载工作空间环境，具体依赖由所选入口决定。
 
 ### 本项目接入说明
 
 本包依据传感器过滤速度，与外部 `/collision_state` UInt8 门控独立。`regulated_modules.launch.py`、`myworld_bringup/entry.launch.py` 和 [launch/obstacle_status.launch.py](launch/obstacle_status.launch.py) 现在是同一套语义：`use_collision_monitor` 是碰撞检测模块（状态枚举链）总开关，Nav2 速度门由独立的 `use_collision_velocity_gate` 控制，两者均默认 false，需显式启用。区域可视化不会产生碰撞判断。碰撞区默认使用 `velocity_polygon`（按速度档切换），自研 box / 动态订阅框仍保留为 `type: "polygon"`。
 
-避障状态链（`car_op_zones.py`、`obstacle_status_translator.py`、`car_op_status_sim.py`）自 2026-10 起也放在本包，默认行为是只发布 `/collision_state` 与 `/obstacle_status_int`，不发布 `/cmd_vel`。`use_obstacle_status`（默认 true）只控制 translator 是否输出枚举。实车既可以跑 `regulated_modules.launch.py`，也可以单独跑 [launch/obstacle_status.launch.py](launch/obstacle_status.launch.py)，但不要同时开。说明见 [doc/OBSTACLE_STATUS.md](doc/OBSTACLE_STATUS.md)。
+避障状态链（`car_op_zones.py`、`obstacle_status_translator.py`、`car_op_status_sim.py`）自 2026-10 起也放在本包，默认行为是只发布 `/collision_state` 与 `/obstacle_status_int`，不发布 `/cmd_vel`。`use_obstacle_status`（默认 true）只控制 translator 是否输出枚举。实车既可以跑 `regulated_modules.launch.py`，也可以单独跑 [launch/obstacle_status.launch.py](launch/obstacle_status.launch.py) ，但不要同时开。说明见 [doc/OBSTACLE_STATUS.md](doc/OBSTACLE_STATUS.md) 。
 
-构建命令统一从 `nav2_ws` 执行，详见[仓库构建与包索引](../README.md)；不在包源码目录运行 colcon。本文依据当前源码描述职责，包存在、可构建或包含测试文件均不代表完成运行验收。
+构建命令统一从 `nav2_ws` 执行，详见[仓库构建与包索引](../README.md) ；不在包源码目录运行 colcon。本文依据当前源码描述职责，包存在、可构建或包含测试文件均不代表完成运行验收。
+
+## 当前扩展与边界
+
+- `Polygon`、`Circle` 和 `VelocityPolygon` 分别提供静态／动态多边形、圆形及速度分档区域，构造选择见 [collision_monitor_node.cpp](src/collision_monitor_node.cpp) 。配置 `velocity_polygon` 不表示状态翻译器也采用同一套 C++ 几何判定。
+- 传感器 `Source` 可配置排除区，运行时服务由 [source.cpp](src/source.cpp) 按 `<source_name>/add_exclusion_zone`、`<source_name>/remove_exclusion_zone` 创建；当前代码只有在初始 `exclusion_zones` 列表非空时才创建服务。只生成了接口、却没有实际服务时，不能靠调用接口自动启用。
+- [ExclusionZone](src/exclusion_zone.cpp) 当前处理二维点，消息保留的 `min_height/max_height` 不代表实现了高度筛选。传感器排除区用于剔除点，和 Costmap 的禁止机器人进入区域是不同语义。
+- `TwistPublisher`／`TwistSubscriber` 构造代码的 `enable_stamped_cmd_vel` 回退为 true。项目三个整车 YAML 显式设 false，以匹配最终裸 `Twist` 链路；独立使用通用参数文件时须核对输入输出类型。
+- 状态脚本 [obstacle_status_translator.py](tools/obstacle_status_translator.py) 的当前多边形点内判断使用射线相交 `any`，并非交点奇偶判定；已知存在圆形区域外、包围盒内角点误判停止的情形。源码保留该分支行为，不将已有常规场景通过描述为完整几何正确性验收。
 
 ## 原有说明与上游资料
+
+以下保留上游原理、配置链接和历史性能数字；当前本地实现与项目入口以本页源码接口及上述边界为准，未在本轮复测这些性能数据。
 
 The Collision Monitor is a node providing an additional level of robot safety.
 It performs several collision avoidance related tasks using incoming data from the sensors, bypassing the costmap and trajectory planners, to monitor for and prevent potential collisions at the emergency-stop level.
@@ -102,4 +122,3 @@ Collision Monitor 是 Nav2 的速度安全监控节点。它订阅 LaserScan、P
         ros2 bag record -o ~/bags/obstacle_real \
   --qos-profile-overrides /tf_static:transient_local \
   /c200_lidar_node/scan /tf /tf_static /car_op_status /motion_state /cmd_vel /odometry
-

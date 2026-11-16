@@ -1,20 +1,28 @@
 # Graceful Motion Controller
 
+## 本地源码接口（2026-11-16）
+
+GracefulController 作为 Controller 插件计算平滑运动控制律。项目参数注册了该候选插件，但默认 fixed_path 与场景 autonomous 分别选择专用固定路径与 MPPI 包装；切换需明确 Controller ID 和参数。
+
+- 构建声明：[package.xml](package.xml) 、[CMakeLists.txt](CMakeLists.txt) 。
+- 插件导出：[graceful_controller_plugin.xml](graceful_controller_plugin.xml) ；共 1 个 class 声明，类型为 `nav2_graceful_controller::GracefulController`。导出类与当前选中的插件 ID 分开核对。
+- 实现定位：[smooth_control_law.cpp](src/smooth_control_law.cpp) 、[graceful_controller.cpp](src/graceful_controller.cpp) 、[parameter_handler.cpp](src/parameter_handler.cpp) 。
+
 ## 当前项目用法
 
 通过平滑控制律跟踪路径，由 Controller Server 加载并生成速度。
 
-包类型：控制插件。包名和构建依赖见 [package.xml](package.xml)，安装目标见 [CMakeLists.txt](CMakeLists.txt)。
+包类型：控制插件。包名和构建依赖见 [package.xml](package.xml) ，安装目标见 [CMakeLists.txt](CMakeLists.txt) 。
 
-主要目录：[src/](src/)、[include/](include/)、[test/](test/)。
+主要目录：[src/](src/) 、[include/](include/) 、[test/](test/) 。
 
 直接依赖（清单节选，完整约束见 manifest）：`angles`、`geometry_msgs`、`nav2_common`、`nav2_core`、`nav2_costmap_2d`、`nav2_msgs`、`nav2_util`、`nav_2d_utils`、`pluginlib`、`rclcpp`、`tf2`、`tf2_geometry_msgs`。
 
-插件声明：[graceful_controller_plugin.xml](graceful_controller_plugin.xml)。插件由对应宿主加载，插件类名以声明 XML 为准。
+插件声明：[graceful_controller_plugin.xml](graceful_controller_plugin.xml) 。插件由对应宿主加载，插件类名以声明 XML 为准。
 
 使用方式：在宿主服务器的插件列表和参数块中配置导出的类；仅构建本包不会自动切换当前运行控制器或规划器。
 
-构建命令统一从 `nav2_ws` 执行，详见[仓库构建与包索引](../README.md)；不在包源码目录运行 colcon。本文依据当前源码描述职责，包存在、可构建或包含测试文件均不代表完成运行验收。
+构建命令统一从 `nav2_ws` 执行，详见[仓库构建与包索引](../README.md) ；不在包源码目录运行 colcon。本文依据当前源码描述职责，包存在、可构建或包含测试文件均不代表完成运行验收。
 
 ## 原有说明与上游资料
 

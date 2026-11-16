@@ -1,18 +1,25 @@
 # Nav2 Voxel Grid
 
+## 本地源码接口（2026-11-16）
+
+提供体素栅格的数据结构和操作算法，由代价地图相关组件使用。它不是传感器驱动，也不是独立的三维定位／规划系统；是否使用 voxel_layer 由具体 Costmap 参数决定。
+
+- 构建声明：[package.xml](package.xml) 、[CMakeLists.txt](CMakeLists.txt) 。
+- 实现定位：[voxel_grid.cpp](src/voxel_grid.cpp) 。
+
 ## 当前项目用法
 
 提供按位压缩的三维体素标记、清除与射线追踪结构，服务于 VoxelLayer。
 
-包类型：体素算法库。包名和构建依赖见 [package.xml](package.xml)，安装目标见 [CMakeLists.txt](CMakeLists.txt)。
+包类型：体素算法库。包名和构建依赖见 [package.xml](package.xml) ，安装目标见 [CMakeLists.txt](CMakeLists.txt) 。
 
-主要目录：[src/](src/)、[include/](include/)、[test/](test/)。
+主要目录：[src/](src/) 、[include/](include/) 、[test/](test/) 。
 
 直接依赖（清单节选，完整约束见 manifest）：`nav2_common`、`rclcpp`。
 
 使用方式：由依赖方通过构建依赖、头文件或 Python 导入使用，不提供通用的独立导航启动命令。
 
-构建命令统一从 `nav2_ws` 执行，详见[仓库构建与包索引](../README.md)；不在包源码目录运行 colcon。本文依据当前源码描述职责，包存在、可构建或包含测试文件均不代表完成运行验收。
+构建命令统一从 `nav2_ws` 执行，详见[仓库构建与包索引](../README.md) ；不在包源码目录运行 colcon。本文依据当前源码描述职责，包存在、可构建或包含测试文件均不代表完成运行验收。
 
 ## 原有说明与上游资料
 

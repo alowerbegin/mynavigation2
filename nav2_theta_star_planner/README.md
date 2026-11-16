@@ -1,20 +1,28 @@
 # Nav2 Theta Star Planner
 
+## 本地源码接口（2026-11-16）
+
+ThetaStarPlanner 是以栅格可见性搜索减少折线约束的 GlobalPlanner 插件。仅在对应 Planner ID 被选中时调用；当前业务固定路径不执行 Theta* 或其他绕障搜索。
+
+- 构建声明：[package.xml](package.xml) 、[CMakeLists.txt](CMakeLists.txt) 。
+- 插件导出：[theta_star_planner.xml](theta_star_planner.xml) ；共 1 个 class 声明，类型为 `nav2_theta_star_planner::ThetaStarPlanner`。导出类与当前选中的插件 ID 分开核对。
+- 实现定位：[theta_star.cpp](src/theta_star.cpp) 、[theta_star_planner.cpp](src/theta_star_planner.cpp) 。
+
 ## 当前项目用法
 
 提供 Theta* 任意角路径搜索，通过栅格视线检查减少路径方向约束。
 
-包类型：规划插件。包名和构建依赖见 [package.xml](package.xml)，安装目标见 [CMakeLists.txt](CMakeLists.txt)。
+包类型：规划插件。包名和构建依赖见 [package.xml](package.xml) ，安装目标见 [CMakeLists.txt](CMakeLists.txt) 。
 
-主要目录：[src/](src/)、[include/](include/)、[test/](test/)。
+主要目录：[src/](src/) 、[include/](include/) 、[test/](test/) 。
 
 直接依赖（清单节选，完整约束见 manifest）：`builtin_interfaces`、`nav2_common`、`nav2_core`、`nav2_costmap_2d`、`nav2_msgs`、`nav2_util`、`pluginlib`、`rclcpp`、`rclcpp_action`、`rclcpp_lifecycle`、`tf2_ros`。
 
-插件声明：[theta_star_planner.xml](theta_star_planner.xml)。插件由对应宿主加载，插件类名以声明 XML 为准。
+插件声明：[theta_star_planner.xml](theta_star_planner.xml) 。插件由对应宿主加载，插件类名以声明 XML 为准。
 
 使用方式：在宿主服务器的插件列表和参数块中配置导出的类；仅构建本包不会自动切换当前运行控制器或规划器。
 
-构建命令统一从 `nav2_ws` 执行，详见[仓库构建与包索引](../README.md)；不在包源码目录运行 colcon。本文依据当前源码描述职责，包存在、可构建或包含测试文件均不代表完成运行验收。
+构建命令统一从 `nav2_ws` 执行，详见[仓库构建与包索引](../README.md) ；不在包源码目录运行 colcon。本文依据当前源码描述职责，包存在、可构建或包含测试文件均不代表完成运行验收。
 
 ## 原有说明与上游资料
 

@@ -1,5 +1,14 @@
 # myagv_keyboard_control
 
+## 本地源码接口（2026-11-16）
+
+直接规控 operation_mode=remote 才启动键盘节点；fixed_path 后台遥控由 /downstream/chassis_control 接入，两个入口不是同一路。键盘直接发 ControlRes，不能与固定路径统一出口并行向同一底盘话题发布。
+
+- 构建声明：[package.xml](package.xml) 、[CMakeLists.txt](CMakeLists.txt) 。
+- CMake 声明的运行目标：`myagv_keyboard_control_node`；具体安装和启动条件见构建文件。
+- 实现定位：[myagv_keyboard_control_node.cpp](src/myagv_keyboard_control_node.cpp) 。
+- 启动资源：[keyboard_control.launch.py](launch/keyboard_control.launch.py) ；启动参数由对应文件声明。
+
 `myagv_keyboard_control` 是 MYAGV 底盘终端键盘直控包。节点按照固定周期直接发布
 `byd_custom_msgs/msg/ControlRes` 到 `/control_to_uart`，接口与 `controlpub` 的最终输出一致。
 按键只改变目标速度，节点按照线速度、角速度及 jerk 限制生成连续的周期输出。
@@ -92,7 +101,7 @@ ros2 launch myworld_bringup entry.launch.py \
   use_rviz:=false use_sim_time:=false
 ```
 
-该入口只启动仿真和 `/downstream/chassis_control` 的 ChassisControl→Twist 网关，不启动本包键盘节点。本包发布 `/control_to_uart` 的 ControlRes，二者类型与话题都不同；因此不能把启动本包当作已经接通仿真遥控。现有仿真用法是[按场景说明周期发布 ChassisControl](../myworld_bringup/README.md#remote仿真遥控-topic)，其超时和停车逻辑由场景网关负责。若需键盘驱动该仿真，须另行提供匹配的消息适配，当前入口未提供。
+该入口只启动仿真和 `/downstream/chassis_control` 的 ChassisControl→Twist 网关，不启动本包键盘节点。本包发布 `/control_to_uart` 的 ControlRes，二者类型与话题都不同；因此不能把启动本包当作已经接通仿真遥控。现有仿真用法是[按场景说明周期发布 ChassisControl](../myworld_bringup/README.md#remote仿真遥控-topic) ，其超时和停车逻辑由场景网关负责。若需键盘驱动该仿真，须另行提供匹配的消息适配，当前入口未提供。
 
 仿真／实车 remote 都不接收导航 Action。若仅需观察已有地图、TF 或雷达，另一个加载同一环境的终端可运行：
 

@@ -1,20 +1,28 @@
 # Smac Planner
 
+## 本地源码接口（2026-11-16）
+
+本包提供 2D A*、Hybrid A* 与 State Lattice 插件。直接 autonomous 的 SmacHybrid 默认使用共享 YAML 的 DUBIN，场景 autonomous 使用 REEDS_SHEPP；autonomous_fixed 选择项目 Hybrid 包装并冻结结果。要区分算法导出、YAML 注册与模式实际选择。
+
+- 构建声明：[package.xml](package.xml) 、[CMakeLists.txt](CMakeLists.txt) 。
+- 插件导出：[smac_plugin_2d.xml](smac_plugin_2d.xml) 、[smac_plugin_hybrid.xml](smac_plugin_hybrid.xml) 、[smac_plugin_lattice.xml](smac_plugin_lattice.xml) ；共 3 个 class 声明，类型为 `nav2_smac_planner::SmacPlanner2D`、`nav2_smac_planner::SmacPlannerHybrid`、`nav2_smac_planner::SmacPlannerLattice`。导出类与当前选中的插件 ID 分开核对。
+- 实现定位：[smac_planner_hybrid.cpp](src/smac_planner_hybrid.cpp) 、[a_star.cpp](src/a_star.cpp) 、[collision_checker.cpp](src/collision_checker.cpp) 。
+
 ## 当前项目用法
 
 提供二维 A*、Hybrid-A* 和 State Lattice 搜索，支持不同车辆运动约束。
 
-包类型：规划插件。包名和构建依赖见 [package.xml](package.xml)，安装目标见 [CMakeLists.txt](CMakeLists.txt)。
+包类型：规划插件。包名和构建依赖见 [package.xml](package.xml) ，安装目标见 [CMakeLists.txt](CMakeLists.txt) 。
 
-主要目录：[src/](src/)、[include/](include/)、[test/](test/)。
+主要目录：[src/](src/) 、[include/](include/) 、[test/](test/) 。
 
 直接依赖（清单节选，完整约束见 manifest）：`angles`、`builtin_interfaces`、`eigen`、`eigen3_cmake_module`、`geometry_msgs`、`nav2_common`、`nav2_core`、`nav2_costmap_2d`、`nav2_msgs`、`nav2_util`、`nav_msgs`、`nlohmann-json-dev` 等。
 
-插件声明：[smac_plugin_2d.xml](smac_plugin_2d.xml)、[smac_plugin_hybrid.xml](smac_plugin_hybrid.xml)、[smac_plugin_lattice.xml](smac_plugin_lattice.xml)。插件由对应宿主加载，插件类名以声明 XML 为准。
+插件声明：[smac_plugin_2d.xml](smac_plugin_2d.xml) 、[smac_plugin_hybrid.xml](smac_plugin_hybrid.xml) 、[smac_plugin_lattice.xml](smac_plugin_lattice.xml) 。插件由对应宿主加载，插件类名以声明 XML 为准。
 
 使用方式：在宿主服务器的插件列表和参数块中配置导出的类；仅构建本包不会自动切换当前运行控制器或规划器。
 
-构建命令统一从 `nav2_ws` 执行，详见[仓库构建与包索引](../README.md)；不在包源码目录运行 colcon。本文依据当前源码描述职责，包存在、可构建或包含测试文件均不代表完成运行验收。
+构建命令统一从 `nav2_ws` 执行，详见[仓库构建与包索引](../README.md) ；不在包源码目录运行 colcon。本文依据当前源码描述职责，包存在、可构建或包含测试文件均不代表完成运行验收。
 
 ## 原有说明与上游资料
 

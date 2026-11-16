@@ -1,5 +1,14 @@
 # myworld_bringup
 
+## 本地源码接口（2026-11-16）
+
+entry.launch.py 默认 autonomous，use_gazebo=true、headless=true；导航模式仍需外部定位。显式 fixed_path 包含后台遥控和导航器内统一出口；检测状态链在场景入口启动一次，子 Launch 的同名状态模块开关会关闭以避免重复。
+
+- 构建声明：[package.xml](package.xml) 、[CMakeLists.txt](CMakeLists.txt) 。
+- 安装脚本：[map_warehouse.py](scripts/map_warehouse.py) 、[audit_warehouse_map.py](scripts/audit_warehouse_map.py) 、[export_slam_map.py](scripts/export_slam_map.py) 、[chassis_control_to_twist.py](scripts/chassis_control_to_twist.py) 、[cpu_lidar.py](scripts/cpu_lidar.py) 、[odom_to_motion_state.py](scripts/odom_to_motion_state.py) 、[tf_system_time.py](scripts/tf_system_time.py) 。脚本安装不等于入口自动执行。
+- 实现定位：[entry.launch.py](launch/entry.launch.py) 、[navigation_launch.py](launch/navigation_launch.py) 、[odom_to_motion_state.py](scripts/odom_to_motion_state.py) 。
+- 启动资源：[entry.launch.py](launch/entry.launch.py) 、[localization_launch.py](launch/localization_launch.py) 、[mapping.launch.py](launch/mapping.launch.py) ；启动参数由对应文件声明。
+
 This package owns the `myworld2` launch flow.
 
 - Keep scenario-specific launch files in `launch/`.
@@ -121,13 +130,13 @@ ros2 topic pub --rate 10 /downstream/chassis_control \
   '{op: 0, linear_velocity: 0.10, angular_velocity: 0.0, acceleration: 0.5}'
 ```
 
-`op=0／1／2／3` 分别为前进／后退／左转／右转；速度字段用非负幅值，符号由 op 决定。结束发布后，当前网关在 0.5 s 命令超时后平滑减速，需确认 `/motion_state` 停稳；需持续请求零速时，把 `linear_velocity`、`angular_velocity` 均置 0 并继续发布。具体行为见 [chassis_control_to_twist.py](scripts/chassis_control_to_twist.py)。实车键盘输出 ControlRes，当前场景网关接收 ChassisControl，直接启动键盘包不会自动驱动这个网关。
+`op=0／1／2／3` 分别为前进／后退／左转／右转；速度字段用非负幅值，符号由 op 决定。结束发布后，当前网关在 0.5 s 命令超时后平滑减速，需确认 `/motion_state` 停稳；需持续请求零速时，把 `linear_velocity`、`angular_velocity` 均置 0 并继续发布。具体行为见 [chassis_control_to_twist.py](scripts/chassis_control_to_twist.py) 。实车键盘输出 ControlRes，当前场景网关接收 ChassisControl，直接启动键盘包不会自动驱动这个网关。
 
 ### 入口选择与外部输入
 
 四个入口互斥，启动后不能热切换。切换前先退出旧导航／仿真入口，避免重复 Gazebo、桥接和速度发布者。三个导航模式由场景包委托规控包启动，不再额外运行一份 `regulated_modules.launch.py`。已有同场景运行时，仅打开 RViz 或下发任务。
 
-使用真实传感器、底盘和定位时，优先使用[规控包的四模式实车命令](../nav2_regulated_modules/README.md#实车四种模式的启动)。如果确需保留场景参数和模型，把上述导航命令的 `use_gazebo` 改为 false，保留 `use_sim_time=false`，并由外部提供 `/scan`、`/motion_state`、定位及其他所需输入；这不自动切换为实车 YAML。场景 `remote use_gazebo=false` 不启动仿真遥控网关或键盘，不作为实车遥控入口。
+使用真实传感器、底盘和定位时，优先使用[规控包的四模式实车命令](../nav2_regulated_modules/README.md#实车四种模式的启动) 。如果确需保留场景参数和模型，把上述导航命令的 `use_gazebo` 改为 false，保留 `use_sim_time=false`，并由外部提供 `/scan`、`/motion_state`、定位及其他所需输入；这不自动切换为实车 YAML。场景 `remote use_gazebo=false` 不启动仿真遥控网关或键盘，不作为实车遥控入口。
 
 默认自主模式在 [myworld2.yaml](params/myworld2.yaml) 基础上，通过规控入口既有 RewrittenYaml 应用 `autonomous_mppi_profile=true`：50 Hz 控制／速度平滑／默认诊断、0.02 s 模型步长、75 步／300 条候选、1.5 s 预测，前进速度上限为 0.5 m/s。仅自主模式选择 `AutonomousMPPIController` 和连续停稳检查；fixed_path 仍选择原 FixedPathController、原参数与原 GoalChecker，remote 不启动导航链。入口不生成 `noamcl_*.yaml`，AMCL 保持禁用；自定义参数文件需配置坐标系与反馈话题，可用 `autonomous_mppi_profile:=false` 关闭自主 MPPI 包装配置。该开关不关闭自主模式的 50 Hz／MPPI 时间网格、TF 时效和进度修复。`myworld2_mppi.yaml` 仅保留为历史参数参考，不再自动加载。
 
@@ -158,7 +167,7 @@ rviz2 -d "$(ros2 pkg prefix --share myworld_bringup)/rviz/nav2_autonomous_fixed_
   --ros-args -p use_sim_time:=false
 ```
 
-三个命令依次用于 autonomous、fixed_path、autonomous_fixed；remote 如需观察，可使用通用 `nav2_default_view.rviz`，但不会因此产生导航服务器或地图定位。场景配置保留该场景的视角和显示项；使用直接规控入口时，也可选[规控包的模式配置](../nav2_regulated_modules/README.md#独立打开-rviz2)。
+三个命令依次用于 autonomous、fixed_path、autonomous_fixed；remote 如需观察，可使用通用 `nav2_default_view.rviz`，但不会因此产生导航服务器或地图定位。场景配置保留该场景的视角和显示项；使用直接规控入口时，也可选[规控包的模式配置](../nav2_regulated_modules/README.md#独立打开-rviz2) 。
 
 autonomous 与 autonomous_fixed 在 Fixed Frame=`map`、定位与生命周期就绪后，可用 `Nav2 Goal` 点击位置并拖动方向，经面板发送单点 Action。只有 autonomous 支持多点 Action；fixed_path 应从业务 Action 下发路线，RViz 负责显示；remote 不使用导航目标工具。固定／冻结路径的保留消息能否显示仍取决于发布者存在和订阅 QoS，不以窗口打开成功作为验收。
 
@@ -190,7 +199,9 @@ autonomous: NavigateToPose／NavigateThroughPoses／goal_pose
 fixed_path: NavigationService(NaviSegment[]) → 业务 Path → FollowPath
 FollowPath → Controller Server → /cmd_vel_nav
   → velocity_smoother → /cmd_vel → Gazebo DiffDrive
-  → controlpub → /control_to_uart
+  → 最终速度 /cmd_vel
+fixed_path：/cmd_vel ＋ /downstream/chassis_control → 导航器内统一出口 → /control_to_uart
+其他导航模式：/cmd_vel → controlpub → /control_to_uart
 ```
 
 控制器、导航器速度观测与 `autonomous_fixed` 停稳判断、平滑器、底盘闭环及独立速度诊断统一读取 `/motion_state` 的 `v_car/w_car`；定位位姿仍来自 TF。导航器旧日志仅在对应开关启用时打印，第四模式即使关闭旧日志也订阅速度反馈用于停稳判断。ROS 侧话题配置在 `params/myworld2.yaml`，桥接继续将 Gazebo `/odom` 重映射为原始 `/odometry`，转换节点保留源 Header，不用当前时间掩盖过期反馈。自主模式控制器、速度平滑器和默认诊断快照为 50 Hz；固定路径及 `autonomous_fixed` 保持 100 Hz，Gazebo 里程计配置保持 100 Hz，实际墙钟接收频率需要单独测量。
@@ -227,7 +238,7 @@ FollowPath → Controller Server → /cmd_vel_nav
 | `/navigate_through_poses` | `nav2_msgs/action/NavigateThroughPoses` | 有序的 `poses[]` |
 | `/goal_pose` | `geometry_msgs/msg/PoseStamped` | RViz 导航目标或外部目标话题 |
 
-发送目标前确认 `header.frame_id=map`、目标在当前地图可通行区域，并确认定位 TF 新鲜。单点／多点命令、反馈与取消说明统一见[规控包 Action 用法](../nav2_regulated_modules/README.md#action-下发与结果检查)；同一组坐标变量必须按当前仿真或实车地图重新设置。消息字段见 [NavigateToPose.action](../nav2_msgs/action/NavigateToPose.action) 和 [NavigateThroughPoses.action](../nav2_msgs/action/NavigateThroughPoses.action)。固定路径的 `navi_segment`、`motion_direction`、`max_speed` 属于另一套 Action 协议，不能作为这些自主 Action 的字段。
+发送目标前确认 `header.frame_id=map`、目标在当前地图可通行区域，并确认定位 TF 新鲜。单点／多点命令、反馈与取消说明统一见[规控包 Action 用法](../nav2_regulated_modules/README.md#action-下发与结果检查) ；同一组坐标变量必须按当前仿真或实车地图重新设置。消息字段见 [NavigateToPose.action](../nav2_msgs/action/NavigateToPose.action) 和 [NavigateThroughPoses.action](../nav2_msgs/action/NavigateThroughPoses.action) 。固定路径的 `navi_segment`、`motion_direction`、`max_speed` 属于另一套 Action 协议，不能作为这些自主 Action 的字段。
 
 自主 Action 的 `distance_remaining` 使用“下游路径估计”和“当前请求目标的直线距离”的较大值，防止末端路径采样提前归零；ETA 包含转向及停稳估计，不参与成功判断。真正成功仍需位置、航向、轮速连续达标。`controller_server.log` 的 `Autonomous arrival waiting=POSITION/HEADING/VELOCITY/SETTLING` 可用于定位等待条件，`number_of_recoveries` 同时统计控制恢复和定位恢复。`nanosec: 0` 本身不是错误，应与 Duration 的 `sec` 一起读取。
 
@@ -235,9 +246,9 @@ FollowPath → Controller Server → /cmd_vel_nav
 
 `/navigation_service` 类型为 `byd_custom_msgs/action/NavigationService`。直线与贝塞尔的 `max_speed` 均为有限正数；同任务所有段方向一致，1 前进、2 倒车，速度符号由方向决定。任务不重置机器人位姿。
 
-起点距离、航向与起步保护可能导致先转向或低速接近，不能假定 Action 接受后立即达到 1.5 m/s。当前 fixed_path 使用专用目标检查器，终点航向只作诊断；停车入口、目标容差与独立定位精度分开评价。具体参数以传入 YAML 与 Launch 重写为准，见[规控包](../nav2_regulated_modules/README.md)。
+起点距离、航向与起步保护可能导致先转向或低速接近，不能假定 Action 接受后立即达到 1.5 m/s。当前 fixed_path 使用专用目标检查器，终点航向只作诊断；停车入口、目标容差与独立定位精度分开评价。具体参数以传入 YAML 与 Launch 重写为准，见[规控包](../nav2_regulated_modules/README.md) 。
 
-当前地图的参数化直线命令见[规控包固定路径 Action](../nav2_regulated_modules/README.md#固定路径-action仅-fixed_path)。以下保留历史几何例子，**坐标来自历史地图**，发送前须核对并替换当前地图、通行区域、定位和起点，不作为当前出生位姿或默认路线：
+当前地图的参数化直线命令见[规控包固定路径 Action](../nav2_regulated_modules/README.md#固定路径-action仅-fixed_path) 。以下保留历史几何例子，**坐标来自历史地图**，发送前须核对并替换当前地图、通行区域、定位和起点，不作为当前出生位姿或默认路线：
 
 ```bash
 ros2 action send_goal --feedback /navigation_service \
@@ -308,9 +319,9 @@ ros2 run tf2_ros tf2_echo base_link base_scan
 | Nav2 等待 `map` TF | 本地 Cartographer 是否已启动并收到雷达／里程计；定位地图是否匹配、时钟是否一致 |
 | RViz 有地图但缺少 map 定位 TF | Map Server 发布 `/map` 不会自动生成 `map→base_link`，仍需 Cartographer 定位 |
 
-UART 空闲时可能不周期发零速，停稳需要新鲜轮速等证据。统一日志参数见[速度日志](../nav2_regulated_modules/doc/velocity_logging.md)。独立状态源启停的最新验收未完成，不能由本 README 推断通过。
+UART 空闲时可能不周期发零速，停稳需要新鲜轮速等证据。统一日志参数见[速度日志](../nav2_regulated_modules/doc/velocity_logging.md) 。独立状态源启停的最新验收未完成，不能由本 README 推断通过。
 
-场景资源见 [models/](models/)、[params/](params/)、[urdf/](urdf/)、[rviz/](rviz/)，依赖与安装见 [package.xml](package.xml)、[CMakeLists.txt](CMakeLists.txt)。
+场景资源见 [models/](models/) 、[params/](params/) 、[urdf/](urdf/) 、[rviz/](rviz/) ，依赖与安装见 [package.xml](package.xml) 、[CMakeLists.txt](CMakeLists.txt) 。
 
 ## 第四种模式 autonomous_fixed
 
@@ -322,6 +333,6 @@ ros2 launch myworld_bringup entry.launch.py \
   use_collision_monitor:=true use_collision_velocity_gate:=false
 ```
 
-检测状态链会发布 `/collision_state` 和 `/obstacle_status_int`，不发布 `/cmd_vel`；fixed_path／autonomous_fixed 根据状态执行减速停车。若自行发布测试状态，应先关闭内置翻译器 `use_obstacle_status:=false`，避免同一状态话题存在两个来源。旧速度门命令须改为 `use_collision_velocity_gate:=true`。详见[规控碰撞参数与实车命令](../nav2_regulated_modules/README.md#collision-状态与-collision-monitor)。
+检测状态链会发布 `/collision_state` 和 `/obstacle_status_int`，不发布 `/cmd_vel`；fixed_path／autonomous_fixed 根据状态执行减速停车。若自行发布测试状态，应先关闭内置翻译器 `use_obstacle_status:=false`，避免同一状态话题存在两个来源。旧速度门命令须改为 `use_collision_velocity_gate:=true`。详见[规控碰撞参数与实车命令](../nav2_regulated_modules/README.md#collision-状态与-collision-monitor) 。
 
-启动使用上面的[第四模式仿真命令](#autonomous_fixed单点规划后冻结跟踪)，定位在其实际部署工作空间中单独启动，等待传感器、TF、生命周期和时间源就绪后再下发[单点 Action](../nav2_regulated_modules/README.md#单点-actionautonomous-与-autonomous_fixed) 或 RViz 目标。该模式拒绝多点 Action 和 NavigationService；对已有实车输入，优先采用[直接规控入口](../nav2_regulated_modules/README.md#实车四种模式的启动)，不要把默认 Gazebo 命令用于实车。完整方案、一次规划约束及暂停恢复规则见 [自主固定路径架构](../nav2_regulated_modules/doc/autonomous_fixed_architecture.md) 。
+启动使用上面的[第四模式仿真命令](#autonomous_fixed单点规划后冻结跟踪) ，定位在其实际部署工作空间中单独启动，等待传感器、TF、生命周期和时间源就绪后再下发[单点 Action](../nav2_regulated_modules/README.md#单点-actionautonomous-与-autonomous_fixed) 或 RViz 目标。该模式拒绝多点 Action 和 NavigationService；对已有实车输入，优先采用[直接规控入口](../nav2_regulated_modules/README.md#实车四种模式的启动) ，不要把默认 Gazebo 命令用于实车。完整方案、一次规划约束及暂停恢复规则见 [自主固定路径架构](../nav2_regulated_modules/doc/autonomous_fixed_architecture.md) 。

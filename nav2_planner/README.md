@@ -1,12 +1,20 @@
 # Nav2 Planner
 
+## 本地源码接口（2026-11-16）
+
+planner_server 装载 YAML 中的 Planner 插件并提供 ComputePathToPose／ComputePathThroughPoses。selected_planner 与请求 ID 的选择逻辑以本地服务器实现为准；fixed_path 启动该服务器用于统一生命周期，但不发送规划 Goal，注册插件仍会参与配置。
+
+- 构建声明：[package.xml](package.xml) 、[CMakeLists.txt](CMakeLists.txt) 。
+- CMake 声明的运行目标：`planner_server`；具体安装和启动条件见构建文件。
+- 实现定位：[planner_server.cpp](src/planner_server.cpp) 、[main.cpp](src/main.cpp) 。
+
 ## 当前项目用法
 
 实现 ComputePathToPose／ComputePathThroughPoses Action，并管理全局规划插件与全局代价地图。
 
-包类型：规划服务器。包名和构建依赖见 [package.xml](package.xml)，安装目标见 [CMakeLists.txt](CMakeLists.txt)。
+包类型：规划服务器。包名和构建依赖见 [package.xml](package.xml) ，安装目标见 [CMakeLists.txt](CMakeLists.txt) 。
 
-主要目录：[src/](src/)、[include/](include/)、[test/](test/)。
+主要目录：[src/](src/) 、[include/](include/) 、[test/](test/) 。
 
 直接依赖（清单节选，完整约束见 manifest）：`builtin_interfaces`、`geometry_msgs`、`nav2_common`、`nav2_core`、`nav2_costmap_2d`、`nav2_msgs`、`nav2_util`、`nav_msgs`、`pluginlib`、`rclcpp`、`rclcpp_action`、`rclcpp_lifecycle` 等。
 
@@ -14,7 +22,7 @@
 
 规划完成返回 Path，不直接发布底盘速度；规控自主模式通过 Action 调用本服务器，固定路径 NavigationService 分支直接生成 Path。
 
-构建命令统一从 `nav2_ws` 执行，详见[仓库构建与包索引](../README.md)；不在包源码目录运行 colcon。本文依据当前源码描述职责，包存在、可构建或包含测试文件均不代表完成运行验收。
+构建命令统一从 `nav2_ws` 执行，详见[仓库构建与包索引](../README.md) ；不在包源码目录运行 colcon。本文依据当前源码描述职责，包存在、可构建或包含测试文件均不代表完成运行验收。
 
 ## 原有说明与上游资料
 

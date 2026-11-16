@@ -1,20 +1,28 @@
 # Nav2 Regulated Pure Pursuit Controller
 
+## 本地源码接口（2026-11-16）
+
+RegulatedPurePursuitController 是通用 RPP 插件。项目直接 autonomous 默认使用 RPP；fixed_path 使用本仓库另一独立实现 FixedPathController，不应把 RPP 的代价／曲率调速开关直接解释为固定路径的全部行为。
+
+- 构建声明：[package.xml](package.xml) 、[CMakeLists.txt](CMakeLists.txt) 。
+- 插件导出：[nav2_regulated_pure_pursuit_controller.xml](nav2_regulated_pure_pursuit_controller.xml) ；共 1 个 class 声明，类型为 `nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController`。导出类与当前选中的插件 ID 分开核对。
+- 实现定位：[regulated_pure_pursuit_controller.cpp](src/regulated_pure_pursuit_controller.cpp) 。
+
 ## 当前项目用法
 
 提供受曲率、代价与目标接近约束的 Pure Pursuit 路径跟踪控制器。
 
-包类型：控制插件。包名和构建依赖见 [package.xml](package.xml)，安装目标见 [CMakeLists.txt](CMakeLists.txt)。
+包类型：控制插件。包名和构建依赖见 [package.xml](package.xml) ，安装目标见 [CMakeLists.txt](CMakeLists.txt) 。
 
-主要目录：[src/](src/)、[include/](include/)、[test/](test/)。
+主要目录：[src/](src/) 、[include/](include/) 、[test/](test/) 。
 
 直接依赖（清单节选，完整约束见 manifest）：`geometry_msgs`、`nav2_common`、`nav2_core`、`nav2_costmap_2d`、`nav2_msgs`、`nav2_util`、`pluginlib`、`rclcpp`、`tf2`、`tf2_geometry_msgs`。
 
-插件声明：[nav2_regulated_pure_pursuit_controller.xml](nav2_regulated_pure_pursuit_controller.xml)。插件由对应宿主加载，插件类名以声明 XML 为准。
+插件声明：[nav2_regulated_pure_pursuit_controller.xml](nav2_regulated_pure_pursuit_controller.xml) 。插件由对应宿主加载，插件类名以声明 XML 为准。
 
 使用方式：在宿主服务器的插件列表和参数块中配置导出的类；仅构建本包不会自动切换当前运行控制器或规划器。
 
-构建命令统一从 `nav2_ws` 执行，详见[仓库构建与包索引](../README.md)；不在包源码目录运行 colcon。本文依据当前源码描述职责，包存在、可构建或包含测试文件均不代表完成运行验收。
+构建命令统一从 `nav2_ws` 执行，详见[仓库构建与包索引](../README.md) ；不在包源码目录运行 colcon。本文依据当前源码描述职责，包存在、可构建或包含测试文件均不代表完成运行验收。
 
 ## 原有说明与上游资料
 

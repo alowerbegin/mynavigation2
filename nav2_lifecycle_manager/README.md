@@ -1,16 +1,26 @@
+# nav2_lifecycle_manager
+
+## 本地源码接口（2026-11-16）
+
+lifecycle_manager 按 node_names 顺序配置、激活受管节点并通过 bond 监测连接。规控入口分别管理地图和导航节点；激活成功表示生命周期就绪，不证明定位、底盘反馈、控制频率或实车精度已满足。
+
+- 构建声明：[package.xml](package.xml) 、[CMakeLists.txt](CMakeLists.txt) 。
+- CMake 声明的运行目标：`lifecycle_manager`；具体安装和启动条件见构建文件。
+- 实现定位：[lifecycle_manager.cpp](src/lifecycle_manager.cpp) 、[lifecycle_manager_client.cpp](src/lifecycle_manager_client.cpp) 、[main.cpp](src/main.cpp) 。
+
 ### Background on lifecycle enabled nodes
 
 ## 当前项目用法
 
 按配置顺序启动、激活、停用和监视生命周期节点，并通过 bond 检测连接状态。
 
-包类型：生命周期管理节点。包名和构建依赖见 [package.xml](package.xml)，安装目标见 [CMakeLists.txt](CMakeLists.txt)。
+包类型：生命周期管理节点。包名和构建依赖见 [package.xml](package.xml) ，安装目标见 [CMakeLists.txt](CMakeLists.txt) 。
 
-主要目录：[src/](src/)、[include/](include/)、[test/](test/)。
+主要目录：[src/](src/) 、[include/](include/) 、[test/](test/) 。
 
 直接依赖（清单节选，完整约束见 manifest）：`bondcpp`、`diagnostic_updater`、`geometry_msgs`、`lifecycle_msgs`、`nav2_common`、`nav2_msgs`、`nav2_util`、`rclcpp_action`、`rclcpp_lifecycle`、`spdlog_wrapper`、`std_msgs`、`std_srvs` 等。
 
-构建命令统一从 `nav2_ws` 执行，详见[仓库构建与包索引](../README.md)；不在包源码目录运行 colcon。本文依据当前源码描述职责，包存在、可构建或包含测试文件均不代表完成运行验收。
+构建命令统一从 `nav2_ws` 执行，详见[仓库构建与包索引](../README.md) ；不在包源码目录运行 colcon。本文依据当前源码描述职责，包存在、可构建或包含测试文件均不代表完成运行验收。
 
 ## 原有说明与上游资料
 

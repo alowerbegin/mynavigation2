@@ -1,22 +1,31 @@
 # Nav2 Controller
 
+## 本地源码接口（2026-11-16）
+
+controller_server 提供 FollowPath，并装载 Controller／GoalChecker／ProgressChecker。项目导航速度重映射为 /cmd_vel_nav，当前整车参数的反馈为 /motion_state；fixed_path 选择专用控制器与目标检查器，终点成功与独立精度／停稳验收分开。
+
+- 构建声明：[package.xml](package.xml) 、[CMakeLists.txt](CMakeLists.txt) 。
+- CMake 声明的运行目标：`controller_server`；具体安装和启动条件见构建文件。
+- 插件导出：[plugins.xml](plugins.xml) ；共 5 个 class 声明，包括 `nav2_controller::SimpleProgressChecker`、`nav2_controller::PoseProgressChecker`、`nav2_controller::SimpleGoalChecker`、`nav2_controller::StoppedGoalChecker`。导出类与当前选中的插件 ID 分开核对。
+- 实现定位：[main.cpp](src/main.cpp) 、[controller_server.cpp](src/controller_server.cpp) 、[simple_progress_checker.cpp](plugins/simple_progress_checker.cpp) 。
+
 ## 当前项目用法
 
 实现 FollowPath Action，加载控制器、进度检查器和目标检查器，计算并发布速度。
 
-包类型：控制服务器。包名和构建依赖见 [package.xml](package.xml)，安装目标见 [CMakeLists.txt](CMakeLists.txt)。
+包类型：控制服务器。包名和构建依赖见 [package.xml](package.xml) ，安装目标见 [CMakeLists.txt](CMakeLists.txt) 。
 
-主要目录：[src/](src/)、[include/](include/)、[plugins/](plugins/)、[test/](test/)。
+主要目录：[src/](src/) 、[include/](include/) 、[plugins/](plugins/) 、[test/](test/) 。
 
 直接依赖（清单节选，完整约束见 manifest）：`angles`、`nav2_common`、`nav2_core`、`nav2_msgs`、`nav2_util`、`nav_2d_msgs`、`nav_2d_utils`、`pluginlib`、`rclcpp`、`rclcpp_action`、`spdlog_wrapper`、`std_msgs`。
 
-插件声明：[plugins.xml](plugins.xml)。插件由对应宿主加载，插件类名以声明 XML 为准。
+插件声明：[plugins.xml](plugins.xml) 。插件由对应宿主加载，插件类名以声明 XML 为准。
 
 ### 本项目接入说明
 
 本项目固定路径使用 `FixedPathController` 与 `fixed_path_goal_checker`；其实现位于 `nav2_regulated_modules`。固定路径 collision 停止期间暂停无进展计时，恢复后沿用原路径。`cmd_vel` 的最终名称取决于 Launch remapping，规控入口重映射到 `/cmd_vel_nav`。
 
-构建命令统一从 `nav2_ws` 执行，详见[仓库构建与包索引](../README.md)；不在包源码目录运行 colcon。本文依据当前源码描述职责，包存在、可构建或包含测试文件均不代表完成运行验收。
+构建命令统一从 `nav2_ws` 执行，详见[仓库构建与包索引](../README.md) ；不在包源码目录运行 colcon。本文依据当前源码描述职责，包存在、可构建或包含测试文件均不代表完成运行验收。
 
 ## 原有说明与上游资料
 
