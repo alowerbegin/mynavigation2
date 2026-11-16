@@ -95,6 +95,7 @@ RegulatedNavigator::RegulatedNavigator(const rclcpp::NodeOptions & options) : na
   declare_parameter<std::string>("speed_limit_topic", "speed_limit");
   declare_parameter<std::string>("chassis_input_topic", "/downstream/chassis_control");
   declare_parameter<std::string>("chassis_output_topic", "/control_to_uart");
+  declare_parameter<std::string>("chassis_navigation_topic", "/cmd_vel");
   declare_parameter("chassis_motion_state_timeout", 0.2);
   declare_parameter("chassis_command_timeout", 0.15);
   declare_parameter("chassis_publish_rate", 100.0);
@@ -254,6 +255,20 @@ nav2_util::CallbackReturn RegulatedNavigator::on_configure(const rclcpp_lifecycl
   control_module_.configure(get_parameter("controller_id").as_string(), get_parameter("goal_checker_id").as_string(), get_parameter("progress_timeout").as_double());
   motion_state_subscriber_ = std::make_unique<MotionStateSubscriber>(*this);
   ChassisControlConfig chassis_control_config;
+  chassis_control_config.unified_output = operation_mode_ == NavigationMode::FIXED_PATH;
+  chassis_control_config.navigation_topic = get_parameter("chassis_navigation_topic").as_string();
+  chassis_control_config.request_takeover = [this]()
+  {
+    cancelTask("后台遥控／统一出口保护接管，旧路径不自动恢复");
+  };
+  chassis_control_config.navigation_active = [this]()
+  {
+    return active_ && task_.type == TaskType::NAVIGATION_SERVICE;
+  };
+  chassis_control_config.navigation_drained = [this]()
+  {
+    return fixed_path_outstanding_follows_ == 0;
+  };
   chassis_control_config.input_topic = get_parameter("chassis_input_topic").as_string();
   chassis_control_config.output_topic = get_parameter("chassis_output_topic").as_string();
   chassis_control_config.motion_state_timeout = get_parameter("chassis_motion_state_timeout").as_double();

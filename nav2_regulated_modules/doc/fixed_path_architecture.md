@@ -8,11 +8,11 @@
 ros2 launch nav2_regulated_modules regulated_modules.launch.py operation_mode:=fixed_path
 ```
 
-这里的“默认”包括 `use_composition:=False`、`use_collision_monitor:=true`、`use_rviz:=True`、`autostart:=true`、`adaptive_goal_braking_enabled:=false` 和 `use_sim_time:=false`。启动文件通过 `RewrittenYaml` 重写参数；显式传入启动参数或 `params_file` 后，应以实际节点参数为准。本文描述源码静态调用关系和默认配置，不代表本轮已启动机器人并测得实际频率、制动距离或停车精度。
+碰撞相关默认值为 `use_collision_monitor:=false`（检测状态链）和 `use_collision_velocity_gate:=false`（速度门）；其他启动默认值以包 README 为准。启动文件通过 `RewrittenYaml` 重写参数；显式传入启动参数或 `params_file` 后，应以实际节点参数为准。本文描述源码静态调用关系，不代表已测得实车制动距离或停车精度。下图中的 Collision Monitor 仅在速度门启用时进入速度链；检测状态链独立输出 `/collision_state`。
 
 ## 1. 启动边界与模块
 
-`operation_mode` 只在 Launch 阶段选择运行图，不支持运行中热切换。`fixed_path` 属于导航组：启动地图、导航生命周期节点、底盘出口和可选可视化；`myagv_keyboard_control` 只在 `remote` 模式启动。固定路径不使用 BT，也不把业务分段交给全局规划器。
+直接规控入口默认 `fixed_path`。`operation_mode` 只在 Launch 阶段选择运行图；固定路径与后台遥控通过统一控制权交接，不热改模式参数。`fixed_path` 属于导航组：启动地图、导航生命周期节点、导航器内唯一底盘出口和可选可视化；该模式不启动 `controlpub`，`myagv_keyboard_control` 仍只在 `remote` 模式启动。固定路径不使用 BT，也不把业务分段交给全局规划器。
 
 ```mermaid
 flowchart LR
@@ -25,9 +25,9 @@ flowchart LR
   ctrl["controller_server + local_costmap<br/>FixedPathController<br/>fixed_path_goal_checker"]
   vel["velocity_smoother"]
   coll["collision_monitor<br/>默认启用"]
-  out["controlpub"]
+  out["ChassisControlSubscriber<br/>统一控制权／唯一出口"]
   uart["/control_to_uart<br/>外部底盘通信"]
-  chassis["ChassisControlSubscriber<br/>独立底盘输入支路"]
+  chassis["后台 ChassisControl"]
   rviz["RViz / 边界可视化<br/>可选"]
   lm["Lifecycle Managers<br/>map；导航；碰撞监控"]
 
@@ -37,7 +37,9 @@ flowchart LR
   ext -->|"/motion_state"| vel
   ext -->|"scan"| coll
   ext -->|"TF"| nav
-  ext -->|"/downstream/chassis_control + /motion_state"| chassis --> uart
+  ext -->|"/downstream/chassis_control"| chassis --> out
+  ext -->|"/motion_state"| out
+  nav -.->|"取消与 FollowPath 终态确认"| out
   nav -->|"/fixed_path_plan、/fixed_path_boundaries"| rviz
   lm -.-> map
   lm -.-> planner
@@ -56,11 +58,13 @@ flowchart LR
 | `controller_server` | 承载 `FollowPath`、`FixedPathController`、`fixed_path_goal_checker`、进度检查器与 `local_costmap`，按控制周期输出速度。 |
 | `velocity_smoother` | 订阅控制器输出、`SpeedLimit` 与 `/motion_state` 闭环反馈，按加减速度及速度边界发布平滑速度。 |
 | `collision_monitor` | 默认订阅平滑速度和 `/c200_lidar_node/scan`，依据 Stop／Slowdown 区域对命令停车或缩放。关闭时平滑器直接输出 `/cmd_vel`。 |
-| `controlpub` | 收到有效 `/cmd_vel` 时，将 `Twist.linear.x/angular.z` 映射到 `ControlRes.v/w`，发布 `/control_to_uart`；它不再做速度限幅。 |
-| `ChassisControlSubscriber` | `regulated_navigator` 中并存的独立输入支路，处理 `/downstream/chassis_control` 与 `/motion_state`，也持有 `/control_to_uart` 发布器。其周期回调检测到该话题发布者多于一个时会停止本支路输出；部署前仍需核对实际发布者和底盘仲裁。 |
+| `controlpub` | 固定路径模式不启动；其他导航模式保留原 Twist → ControlRes 转发。 |
+| `ChassisControlSubscriber` | 导航器内唯一底盘出口：统一接收最终 `/cmd_vel`、后台遥控及 MotionState。遥控优先取消旧路径；等下游终态与新鲜停稳反馈后放行遥控，超时沿原 S 曲线停车后释放，不自动恢复旧路径。 |
 | 外部系统 | Launch **不启动**定位、雷达、`/odometry`、`/motion_state` 或底盘驱动；必须由现场系统提供。RViz 与碰撞边界显示不参与控制判定。 |
 
-默认 `Lifecycle Manager` 分别管理 `map_server`、`planner_server → controller_server → smoother_server → velocity_smoother → regulated_navigator`，以及 `collision_monitor`。`controlpub` 和边界显示节点不在这些生命周期列表中。`use_composition:=true` 时 Nav2 组件装入指定容器，`regulated_navigator` 与 `controlpub` 仍以独立进程启动；业务调用链不变。
+默认 `Lifecycle Manager` 分别管理 `map_server`、`planner_server → controller_server → smoother_server → velocity_smoother → regulated_navigator`，以及启用时的 `collision_monitor`。边界显示节点不在这些生命周期列表中。`use_composition:=true` 时 Nav2 组件装入指定容器，`regulated_navigator` 仍以独立进程启动；固定路径统一出口随其生命周期激活／停用。
+
+遥控交接不是仅发送取消请求：导航器统计每个已发送 FollowPath，包含接管后才返回接受句柄的请求；迟到句柄会立即取消，收到拒绝或最终结果才释放统计。交接中关闭导航速度通路，输出保护性零速；须收到交接后的新鲜停稳反馈才能执行仍有效的遥控命令。零速度遥控消息也保持占用，后台须停止发送并等待超时减速、实测停稳后，再下发新路径。下游无终态则持续停车。完整状态及默认时效见包 README 的“fixed_path 后台遥控与统一控制权”。
 
 ## 2. Action、路径生成与任务接管
 
@@ -90,7 +94,7 @@ sequenceDiagram
   participant F as FixedPathController
   participant V as Velocity Smoother
   participant M as Collision Monitor
-  participant P as controlpub
+  participant P as 导航器内统一出口
   participant D as /control_to_uart
   U->>N: NavigationService Goal（分段、方向、速度）
   N->>N: 校验、贝塞尔采样、切线航向、任务接管
@@ -176,7 +180,7 @@ flowchart TD
   pose --> cmd["进度检查 → FixedPathController → /cmd_vel_nav"]
   cmd --> vs["VelocitySmoother::smootherTimer() 100 Hz"]
   vs --> cm["CollisionMonitor::cmdVelInCallback() 消息触发"]
-  cm --> cp["ControlPub::onCmdVel() 消息触发"]
+  cm --> cp["统一出口缓存最终导航速度<br/>processUnifiedCommand() 100 Hz"]
   mon["RegulatedNavigator::monitorTask() 5 Hz"] --> tf["TF、取消、进度、恢复"]
   fb["FollowPath feedback 回调"] --> service["NavigationService 进度反馈"]
   diag["RegulatedNavigator::logVelocityChain() 1 Hz"] --> logs["仅诊断"]
@@ -190,16 +194,16 @@ flowchart TD
 | 导航监控定时器，`5 Hz` | `RegulatedNavigator::monitorTask()`，周期 `200 ms` | 处理取消、`map→base_link` TF 丢失、位姿突跳开关、任务无进展与恢复；仅自主导航分支会定期重规划。 |
 | 普通导航反馈定时器，`5 Hz` | `RegulatedNavigator::publishFeedback()` | 向普通 `NavigateToPose`／`NavigateThroughPoses` 发布反馈；固定路径进度由 `FollowPath` feedback 回调触发。 |
 | 诊断定时器，`1 Hz` | `RegulatedNavigator::logVelocityChain()` | 汇总里程计、控制器输出和平滑器输出；不参与控制。 |
-| 底盘输入支路，`100 Hz` | `ChassisControlSubscriber::processControlCommand()` | **仅收到该支路指令并保持其状态时**计算 S 曲线输出；检查指令／`MotionState` 超时和发布者冲突。 |
+| 底盘统一出口，`100 Hz` | `ChassisControlSubscriber::processControlCommand() → processUnifiedCommand()` | 选择最终导航速度、遥控 S 曲线或零速；检查指令／反馈时效、下游终态与出口冲突。 |
 | 局部代价地图，更新 `5 Hz`／发布 `2 Hz` | `controller_server.local_costmap` | 激光 `voxel_layer` 与 `inflation_layer`，为控制服务器提供位姿与地图状态。 |
 | 全局代价地图，更新／发布 `1 Hz` | `planner_server.global_costmap` | 随 Planner Server 启动，但本模式不请求全局规划。 |
-| 消息触发，无固定输出频率 | `CollisionMonitor::cmdVelInCallback() → process()`；`ControlPub::onCmdVel()` | 前者依据最新扫描点和区域处理每条输入速度，后者转发有效速度；频率受上游消息和执行调度影响。 |
+| 消息触发，无固定输入频率 | `CollisionMonitor::cmdVelInCallback() → process()`；`ChassisControlSubscriber::onNavigationVelocity()` | 前者依据最新扫描点和区域处理输入速度，后者仅在导航持权时缓存最终速度；底盘输出由统一定时器选择。 |
 
 `Controller Server` 使用 `/odometry`，Velocity Smoother 使用 `/motion_state`；两者是不同参数入口。`regulated_navigator` 另订阅 `/odometry` 做速度链诊断，并用 TF 查询 `map→base_link` 监测任务进度。局部代价地图由控制服务器启动，不能因业务路径不经全局规划就认为控制链不需要 TF、雷达或 Costmap。
 
 Collision Monitor 依据 `base_link` 周围的矩形区域处理激光点：Stop L3 的前／后／侧留白为 `1.2/0.8/0.4 m`；Slowdown L2 为 `2.5/1.5/0.6 m`、速度比 `0.6`；Slowdown L1 为 `4.0/2.5/0.8 m`、速度比 `0.8`。配置的扫描源超时为 `0.5 s`。它是速度链上的独立安全层，不会替上游重新规划固定路径；区域、点数门槛和传感器有效性仍应以现场参数及观测为准。
 
-`/speed_limit` 的绝对值同时进入控制器插件和速度平滑器。速度平滑器默认线速度范围 `[-1.5, 1.5] m/s`、线加／减速度 `+2.5/-2.5 m/s²`，角速度范围 `[-2.0, 2.0] rad/s`，`CLOSED_LOOP` 反馈来自 `/motion_state`。`use_collision_monitor:=false` 时 Launch 把平滑器输出直接改映射至 `/cmd_vel`；默认开启时由碰撞监控发布最终 `/cmd_vel`。`controlpub` 只做消息字段映射，底盘驱动可能另有限速，须以现场实现核对。
+`/speed_limit` 的绝对值同时进入控制器插件和速度平滑器。速度／加减速限值读取实际 YAML 与 Launch 覆盖，当前配置见包 README；`CLOSED_LOOP` 反馈来自 `/motion_state`。`use_collision_velocity_gate:=false` 时 Launch 把平滑器输出直接映射至 `/cmd_vel`；显式启用速度门时由碰撞监控发布最终 `/cmd_vel`。检测状态链开关 `use_collision_monitor` 不改变这条路由。统一出口在导航持权时转发最终导航速度，不叠加遥控专用限幅；交接／反馈失效的保护性零速不承诺正常平滑斜坡，底盘实际制动须实车验收。
 
 ### 4.1 闭环平滑与全零停车
 
@@ -236,7 +240,7 @@ Collision Monitor 依据 `base_link` 周围的矩形区域处理激光点：Stop
 | 哪些节点启动、哪些参数被覆盖、速度如何重映射？ | [`regulated_modules.launch.py`](../launch/regulated_modules.launch.py)、[`regulated_modules.yaml`](../params/regulated_modules.yaml) |
 | Action 接受、插值、方向与速度限制在哪里？ | [`navigator_fixed_path.cpp`](../src/navigator_fixed_path.cpp)、[`NavigationService.action`](../../byd_custom_msgs/action/NavigationService.action)、[`NaviSegment.msg`](../../byd_custom_msgs/msg/NaviSegment.msg) |
 | 跟踪、起点策略、制动和到点在哪一层？ | [`fixed_path_controller.cpp`](../src/fixed_path_controller.cpp)、[`fixed_path_goal_checker.cpp`](../src/fixed_path_goal_checker.cpp)、[`controller_server.cpp`](../../nav2_controller/src/controller_server.cpp) |
-| 监控、恢复、反馈和最终速度出口在哪里？ | [`navigator_monitor.cpp`](../src/navigator_monitor.cpp)、[`navigator_control.cpp`](../src/navigator_control.cpp)、[`chassis_control_subscriber.cpp`](../src/chassis_control_subscriber.cpp)、[`controlpub_node.cpp`](../../controlpub/src/controlpub_node.cpp) |
+| 监控、恢复、反馈和最终速度出口在哪里？ | [`navigator_monitor.cpp`](../src/navigator_monitor.cpp)、[`navigator_control.cpp`](../src/navigator_control.cpp)、[`chassis_control_subscriber.cpp`](../src/chassis_control_subscriber.cpp)、[`chassis_control_authority.cpp`](../src/chassis_control_authority.cpp) |
 
 现场核对建议从 `ros2 lifecycle get /regulated_navigator`、`ros2 action info /navigation_service`、`ros2 param get /controller_server controller_frequency`、`ros2 param get /velocity_smoother smoothing_frequency`、`ros2 topic info -v /control_to_uart`、TF、`/odometry`、`/motion_state` 和雷达扫描入手。这些命令只用于后续运行态取证；本文没有把静态源码结论当作现场验证结果。
 

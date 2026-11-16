@@ -152,6 +152,11 @@ rclcpp_action::GoalResponse RegulatedNavigator::handleNavigationServiceGoal(cons
     LOG_WARN("拒绝 NavigationService Goal：节点未激活或分段数组为空");
     return rclcpp_action::GoalResponse::REJECT;
   }
+  if (!chassis_control_subscriber_ || !chassis_control_subscriber_->canStartNavigation())
+  {
+    LOG_WARN("拒绝 NavigationService Goal：遥控占用、交接未完成、出口冲突或无新鲜停稳反馈");
+    return rclcpp_action::GoalResponse::REJECT;
+  }
   const uint8_t requested_direction = goal->navi_segment.front().motion_direction;
   for (std::size_t index = 0; index < goal->navi_segment.size(); ++index)
   {
@@ -191,6 +196,15 @@ rclcpp_action::CancelResponse RegulatedNavigator::handleNavigationServiceCancel(
 // 车头姿态由切线和方向生成，当前定位不被重置；超过全局速度上限时钳位，不因此自动拒绝 Goal。
 void RegulatedNavigator::handleNavigationServiceAccepted(const std::shared_ptr<NavigationServiceHandle> goal)
 {
+  // Goal 接受与执行回调之间可能先处理遥控，执行前再次确认控制权。
+  if (!active_ || !chassis_control_subscriber_ || !chassis_control_subscriber_->canStartNavigation())
+  {
+    auto result = std::make_shared<NavigationService::Result>();
+    result->finish = false;
+    goal->abort(result);
+    LOG_WARN("NavigationService Goal 接受后控制权已变化，终止该任务");
+    return;
+  }
   auto prepared_path = prepareFixedPath(goal->get_goal()->navi_segment);
   if (!prepared_path)
   {
@@ -200,7 +214,8 @@ void RegulatedNavigator::handleNavigationServiceAccepted(const std::shared_ptr<N
     LOG_ERROR("NavigationService Goal 已接受但分段路径生成失败");
     return;
   }
-  if (!follow_client_->wait_for_action_server(std::chrono::duration<double>(server_timeout_)))
+  // 不在默认回调组内阻塞等待服务器，避免阻塞后台遥控及统一出口定时器。
+  if (!follow_client_->action_server_is_ready())
   {
     auto result = std::make_shared<NavigationService::Result>();
     result->finish = false;

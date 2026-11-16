@@ -24,7 +24,7 @@ This package owns the `myworld2` launch flow.
 | 地图与定位 | `/userdata/map/pbstream/out.yaml`；外部 Cartographer 提供 `map→base_link` | 相同 |
 | 仿真与显示 | 后台 Gazebo 服务端、传感器桥接、速度转换、Nav2、RViz2；不打开 Gazebo 窗口 | 相同 |
 | 外部 `/collision_state` 门控 | 关闭，`enable_collision_state` 仅对固定路径生效 | 默认启用 |
-| Collision Monitor | 默认关闭 | 默认关闭 |
+| 碰撞检测状态链／速度门 | 两者均默认关闭，独立开关 | 相同 |
 | 碰撞区域可视化 | 默认关闭 | 默认开启；可视化不产生碰撞状态 |
 
 | 补充模式 | 任务输入 | 执行与显示 |
@@ -173,7 +173,7 @@ autonomous 与 autonomous_fixed 在 Fixed Frame=`map`、定位与生命周期就
 | 参数 | 直接传递 params/myworld2.yaml，可用完整 `params_file` 覆盖；不生成 noamcl 临时参数文件 |
 | 时间 | `use_sim_time=false`，使用系统时间；设 true 恢复仿真时钟桥接 |
 | 界面 | 各模式默认 `use_gazebo=true`、`headless=true`；三个导航模式默认 `use_rviz=true`，remote 不进入内置 RViz 分支 |
-| collision | fixed_path 默认启用外部状态门控与区域可视化；自主模式门控和可视化关闭，Collision Monitor 各模式均默认 false |
+| collision | fixed_path／autonomous_fixed 默认启用状态门控；检测状态链与速度门默认均关闭、独立启用；autonomous 不启用状态门控 |
 | 启动延迟 | 三个导航模式共用 `navigation_stack_start_delay`，默认沿用 `fixed_path_stack_start_delay=3.0`；RViz 5 s；延迟不保证外部定位已就绪 |
 
 `map:=...` 对三个导航模式均可显式覆盖默认地图。`ign_partition` 默认按 ROS_DOMAIN_ID 与启动 PID 生成；外部 Ignition 工具需连接相同 partition。只有显式设置 `use_gazebo:=false` 时，才关闭仿真与桥接，并要求外部提供 `/scan`、`/motion_state` 及定位所需的其他输入；Cartographer 本身不生成这些传感器与速度数据。默认规控速度反馈不再要求外部 `/odometry`。
@@ -314,6 +314,14 @@ UART 空闲时可能不周期发零速，停稳需要新鲜轮速等证据。统
 
 ## 第四种模式 autonomous_fixed
 
-Collision Monitor 默认不启动，速度平滑器直接输出 `/cmd_vel`。外部 `/collision_state` 门控和控制器局部 Costmap 足迹检查沿用原配置；本次默认值调整需下次启动导航时生效。
+碰撞检测状态链与速度门默认都不启动，速度平滑器直接输出 `/cmd_vel`。`use_collision_monitor:=true` 启动动态区域和状态翻译器；`use_collision_velocity_gate:=true` 才插入 Collision Monitor 速度门。仿真状态链用 `/scan` 和 sim 尺寸档，只在本入口启动一次，避免与子 Launch 重复。外部 `/collision_state` 门控和控制器局部 Costmap 足迹检查沿用原配置。
+
+```bash
+ros2 launch myworld_bringup entry.launch.py \
+  operation_mode:=autonomous_fixed \
+  use_collision_monitor:=true use_collision_velocity_gate:=false
+```
+
+检测状态链会发布 `/collision_state` 和 `/obstacle_status_int`，不发布 `/cmd_vel`；fixed_path／autonomous_fixed 根据状态执行减速停车。若自行发布测试状态，应先关闭内置翻译器 `use_obstacle_status:=false`，避免同一状态话题存在两个来源。旧速度门命令须改为 `use_collision_velocity_gate:=true`。详见[规控碰撞参数与实车命令](../nav2_regulated_modules/README.md#collision-状态与-collision-monitor)。
 
 启动使用上面的[第四模式仿真命令](#autonomous_fixed单点规划后冻结跟踪)，定位在其实际部署工作空间中单独启动，等待传感器、TF、生命周期和时间源就绪后再下发[单点 Action](../nav2_regulated_modules/README.md#单点-actionautonomous-与-autonomous_fixed) 或 RViz 目标。该模式拒绝多点 Action 和 NavigationService；对已有实车输入，优先采用[直接规控入口](../nav2_regulated_modules/README.md#实车四种模式的启动)，不要把默认 Gazebo 命令用于实车。完整方案、一次规划约束及暂停恢复规则见 [自主固定路径架构](../nav2_regulated_modules/doc/autonomous_fixed_architecture.md) 。

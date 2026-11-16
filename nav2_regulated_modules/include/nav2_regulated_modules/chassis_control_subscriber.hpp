@@ -1,16 +1,18 @@
 // 底盘远程支路的接口与单轴 S 曲线实现。速度单位为 m/s、rad/s，加速度和 jerk 分别再除以秒及秒²。
-// SCurvePlanner 只推进数值状态；ChassisControlSubscriber 负责消息、超时和输出。它与导航出口的发布者冲突检查不等于统一控制权仲裁。
+// SCurvePlanner 只推进数值状态；fixed_path 由 ChassisControlSubscriber 仲裁并统一输出，其他模式保留原独立支路。
 
 #ifndef NAV2_REGULATED_MODULES__CHASSIS_CONTROL_SUBSCRIBER_HPP_
 #define NAV2_REGULATED_MODULES__CHASSIS_CONTROL_SUBSCRIBER_HPP_
 
 #include <chrono>
 #include <cstdint>
+#include <functional>
 #include <mutex>
 #include <string>
 
 #include "byd_custom_msgs/msg/chassis_control.hpp"
 #include "byd_custom_msgs/msg/control_res.hpp"
+#include "geometry_msgs/msg/twist.hpp"
 #include "nav2_regulated_modules/motion_state_subscriber.hpp"
 #include "nav2_util/lifecycle_node.hpp"
 #include "rclcpp/rclcpp.hpp"
@@ -198,6 +200,12 @@ private:
 // 底盘指令入口、输出与安全限幅；速度和加速度参数分别对应线运动及旋转。
 struct ChassisControlConfig
 {
+  // 仅 fixed_path 启用；所有回调由导航器默认 MutuallyExclusive 回调组串行执行。
+  bool unified_output{false};
+  std::string navigation_topic{"/cmd_vel"};
+  std::function<void()> request_takeover;
+  std::function<bool()> navigation_active;
+  std::function<bool()> navigation_drained;
   std::string input_topic{"/downstream/chassis_control"};
   std::string output_topic{"/control_to_uart"};
   // 反馈最大允许接收年龄 s；与消息 Header 时间不是同一计时依据。
@@ -230,13 +238,33 @@ class ChassisControlSubscriber
   // 先清理 MotionState 和旧命令，再按 publish_rate 创建周期处理定时器。
   // 重置后需要新反馈和新有效命令才能进入远程输出。
   void activate();
-  // 停用标志、清除控制状态并取消定时器；当前实现不调用 publishZero。
-  // 因此不能把本函数注释写成“已发停车并停稳”，需要调用方另行收口。
+  // 停用并取消定时器；统一出口发送零速，不等同于机械停稳。
   void deactivate();
   // 使支路 inactive、清理目标与反馈快照；本函数不取消定时器也不发布零速。
   void reset();
+  // 遥控占用／交接中拒绝新路径；空闲起步必须有新鲜停稳反馈及下游终态。
+  bool canStartNavigation();
 
 private:
+  enum class Authority
+  {
+    IDLE,
+    NAVIGATION,
+    HANDOVER,
+    REMOTE,
+    STOPPING
+  };
+  void onNavigationVelocity(const geometry_msgs::msg::Twist::SharedPtr message);
+  void processUnifiedCommand();
+  bool motionFresh(const MotionStateSnapshot & state) const;
+  bool motionStopped(const MotionStateSnapshot & state) const;
+  void publishOutput(double linear_velocity, double angular_velocity);
+  Authority authority_{Authority::IDLE};
+  geometry_msgs::msg::Twist navigation_velocity_;
+  std::chrono::steady_clock::time_point navigation_receive_time_{};
+  std::chrono::steady_clock::time_point handover_since_{};
+  bool has_navigation_velocity_{false};
+  rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr navigation_subscription_;
   // 缓存最近一次已解析指令；超时和运动状态检查先于周期输出。
   struct TargetCommand
   {

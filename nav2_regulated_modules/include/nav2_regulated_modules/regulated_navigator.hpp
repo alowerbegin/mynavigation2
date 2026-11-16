@@ -264,6 +264,8 @@ private:
   uint64_t task_generation_ { 0 };
   uint64_t plan_sequence_ { 0 };
   uint64_t follow_sequence_ { 0 };
+  // 取消响应仅代表接受取消；须等待每个已发送 FollowPath 的拒绝或终态结果。
+  std::size_t fixed_path_outstanding_follows_{0};
   NavigationTask task_;
   NavigationMode operation_mode_ { NavigationMode::AUTONOMOUS };
   std::unique_ptr<MotionStateSubscriber> motion_state_subscriber_;

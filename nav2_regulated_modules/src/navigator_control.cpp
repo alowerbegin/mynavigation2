@@ -67,6 +67,22 @@ void RegulatedNavigator::sendFollowPath(const nav_msgs::msg::Path & path)
   // 发送请求时还没有可靠的已接受句柄；响应到达后先校验代次，才能保存为当前跟踪目标。
   options.goal_response_callback = [this, generation, sequence](auto handle)
   {
+    if (operation_mode_ == NavigationMode::FIXED_PATH)
+    {
+      if (!handle && fixed_path_outstanding_follows_ > 0)
+      {
+        --fixed_path_outstanding_follows_;
+      }
+      // 接管时尚未返回句柄的请求也必须取消，不能让迟到 Goal 继续控制底盘。
+      if (!isCurrentFollow(generation, sequence))
+      {
+        if (handle)
+        {
+          follow_client_->async_cancel_goal(handle);
+        }
+        return;
+      }
+    }
     if (operation_mode_ == NavigationMode::AUTONOMOUS_FIXED)
     {
       if (!handle && frozen_outstanding_follows_ > 0)
@@ -126,6 +142,10 @@ void RegulatedNavigator::sendFollowPath(const nav_msgs::msg::Path & path)
   // 下游结果只影响匹配当前 generation／sequence 的任务；迟到结果不能结束新任务。
   options.result_callback = [this, generation, sequence](const auto & result)
   {
+    if (operation_mode_ == NavigationMode::FIXED_PATH && fixed_path_outstanding_follows_ > 0)
+    {
+      --fixed_path_outstanding_follows_;
+    }
     if (operation_mode_ == NavigationMode::AUTONOMOUS_FIXED && frozen_outstanding_follows_ > 0)
     {
       --frozen_outstanding_follows_;
@@ -155,7 +175,22 @@ void RegulatedNavigator::sendFollowPath(const nav_msgs::msg::Path & path)
   {
     ++frozen_outstanding_follows_;
   }
-  follow_client_->async_send_goal(goal, options);
+  if (operation_mode_ == NavigationMode::FIXED_PATH)
+  {
+    ++fixed_path_outstanding_follows_;
+  }
+  try
+  {
+    follow_client_->async_send_goal(goal, options);
+  }
+  catch (...)
+  {
+    if (operation_mode_ == NavigationMode::FIXED_PATH)
+    {
+      --fixed_path_outstanding_follows_;
+    }
+    throw;
+  }
 }
 
 // 比较任务代次与跟踪轮次；同一任务换路径也会使旧 sequence 失效。

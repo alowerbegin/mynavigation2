@@ -165,7 +165,7 @@ FollowPath → Controller Server → /cmd_vel_nav → Velocity Smoother
   → /cmd_vel → controlpub → /control_to_uart
 ```
 
-启用 Collision Monitor 后，平滑器先发 `/cmd_vel_collision_in`，监控过滤后发 `/cmd_vel`。标准 BT 入口由 bt_navigator 编排，是否调用 SmoothPath 取决于 BT。路径平滑与速度平滑是不同功能。
+启用 `use_collision_velocity_gate` 后，平滑器先发 `/cmd_vel_collision_in`，监控过滤后发 `/cmd_vel`。`use_collision_monitor` 现在控制独立碰撞检测状态链，只发布状态，由下游执行减速停车。标准 BT 入口由 bt_navigator 编排，是否调用 SmoothPath 取决于 BT。路径平滑与速度平滑是不同功能。
 
 | 接口 | 类型／含义 |
 |---|---|
@@ -337,7 +337,7 @@ NavigationService 支持直线／三次贝塞尔；各段同向，方向 1 前�
 
 外部 collision 门控在 fixed_path 默认启用，自主／遥控不启用。状态 4／3／2 分别为任务速度上限的 100%／65%／35%，1／0 停止；首次从未收到消息按 4，收到后非法值或断流达到 0.5 秒停车。恢复 4 只解除限制，不创建任务或恢复已取消任务。
 
-Collision Monitor 与上述门控独立，直接规控和当前 myworld 入口 `use_collision_monitor` 均默认 false；区域可视化不产生碰撞状态。Launch 的 enable_collision_state 默认 true 与独立 C++ 节点 collision_state_enabled 的回退 false 属于不同配置层。
+直接规控和 myworld 入口的 `use_collision_monitor`（检测状态链）、`use_collision_velocity_gate`（速度门）均默认 false，二者独立；区域可视化本身不产生碰撞状态。启用检测链后，翻译器从雷达和动态区域生成 `/collision_state`，fixed_path／autonomous_fixed 可按状态减速停车。Launch 的 enable_collision_state 默认 true 与独立 C++ 节点 collision_state_enabled 的回退 false 属于不同配置层。旧速度门命令须改用 `use_collision_velocity_gate:=true`；用法及雷达参数见[碰撞状态链说明](nav2_regulated_modules/README.md#collision-状态与-collision-monitor)。
 
 - [规控完整说明](nav2_regulated_modules/README.md)：模式、反馈、默认配置与门控状态表。
 - [50 Hz collision Action 例子](nav2_regulated_modules/tools/COLLISION_TEST.md)：周期 4→3→2→1→0、1.5 m/s、往返倒车及结果分类。

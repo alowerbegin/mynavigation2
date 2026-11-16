@@ -47,7 +47,23 @@ ChassisControlSubscriber::ChassisControlSubscriber(
   const auto qos = rclcpp::QoS(rclcpp::KeepLast(10)).reliable();
   subscription_ = node.create_subscription<byd_custom_msgs::msg::ChassisControl>(config_.input_topic, qos,
       std::bind(&ChassisControlSubscriber::onChassisControl, this, std::placeholders::_1));
-  publisher_ = node.create_publisher<byd_custom_msgs::msg::ControlRes>(config_.output_topic, qos);
+  // 统一出口自行控制生命周期，停用时也必须能发送最后一帧零速。
+  if (config_.unified_output)
+  {
+    publisher_ = rclcpp::create_publisher<byd_custom_msgs::msg::ControlRes>(node_, config_.output_topic, qos);
+  }
+  else
+  {
+    publisher_ = node.create_publisher<byd_custom_msgs::msg::ControlRes>(config_.output_topic, qos);
+  }
+  if (config_.unified_output)
+  {
+    if (config_.navigation_topic.empty() || !config_.request_takeover || !config_.navigation_active || !config_.navigation_drained)
+    {
+      throw std::invalid_argument("Unified chassis output requires navigation topic and authority callbacks");
+    }
+    navigation_subscription_ = node.create_subscription<geometry_msgs::msg::Twist>(config_.navigation_topic, rclcpp::QoS(1).best_effort(), std::bind(&ChassisControlSubscriber::onNavigationVelocity, this, std::placeholders::_1));
+  }
 }
 
 // 校验非负幅值、有限数与 op，将方向转换为速度符号后限幅并存入目标。
@@ -79,22 +95,38 @@ void ChassisControlSubscriber::onChassisControl(const byd_custom_msgs::msg::Chas
   }
   command.linear_velocity = std::clamp(command.linear_velocity, -config_.linear_speed_max, config_.linear_speed_max);
   command.angular_velocity = std::clamp(command.angular_velocity, -config_.angular_speed_max, config_.angular_speed_max);
+  bool request_takeover = false;
   {
     std::lock_guard<std::mutex> lock(mutex_);
     last_command_tmie_ = std::chrono::steady_clock::now();
     target_command_ = command;
     has_command_ = true;
+    if (config_.unified_output && authority_ != Authority::REMOTE && authority_ != Authority::HANDOVER)
+    {
+      authority_ = Authority::HANDOVER;
+      handover_since_ = last_command_tmie_;
+      has_navigation_velocity_ = false;
+      request_takeover = true;
+    }
+  }
+  if (request_takeover)
+  {
+    LOG_INFO("后台遥控请求接管，关闭导航输出并等待 FollowPath 终态及新鲜停稳反馈");
+    config_.request_takeover();
   }
   LOG_DEBUG("收到 ChassisControl：op={}，linear_velocity={}，angular_velocity={}，acceleration={}", static_cast<unsigned int>(message->op), message->linear_velocity, message->angular_velocity, message->acceleration);
 }
 
 // 先清理 MotionState 和旧命令，再按 publish_rate 创建周期处理定时器。
 // 重置后需要新反馈和新有效命令才能进入远程输出。
-void ChassisControlSubscriber::activate() {
+void ChassisControlSubscriber::activate()
+{
   motion_state_subscriber_.reset();
   {
     std::lock_guard<std::mutex> lock(mutex_);
     clearControlStateLocked();
+    authority_ = Authority::IDLE;
+    has_navigation_velocity_ = false;
     active_ = true;
   }
   const auto period = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::duration<double>(1.0 / config_.publish_rate));
@@ -102,21 +134,33 @@ void ChassisControlSubscriber::activate() {
   LOG_INFO("ChassisControl 事件驱动闭环已激活，output_topic={}", config_.output_topic);
 }
 
-// 停用标志、清除控制状态并取消定时器；当前实现不调用 publishZero。
-// 因此不能把本函数注释写成“已发停车并停稳”，需要调用方另行收口。
-void ChassisControlSubscriber::deactivate() {
+// 停用并取消定时器；统一出口发送零速，但不据此声称机械停稳。
+void ChassisControlSubscriber::deactivate()
+{
   std::lock_guard<std::mutex> lock(mutex_);
   active_ = false;
   clearControlStateLocked();
-  timer_->cancel();
+  if (config_.unified_output)
+  {
+    publishZero();
+    authority_ = Authority::IDLE;
+    has_navigation_velocity_ = false;
+  }
+  if (timer_)
+  {
+    timer_->cancel();
+  }
   LOG_INFO("ChassisControl 事件驱动闭环已停用");
 }
 
 // 使支路 inactive、清理目标与反馈快照；本函数不取消定时器也不发布零速。
-void ChassisControlSubscriber::reset() {
+void ChassisControlSubscriber::reset()
+{
   std::lock_guard<std::mutex> lock(mutex_);
   active_ = false;
   clearControlStateLocked();
+  authority_ = Authority::IDLE;
+  has_navigation_velocity_ = false;
   motion_state_subscriber_.reset();
 }
 
@@ -125,6 +169,11 @@ void ChassisControlSubscriber::reset() {
 void ChassisControlSubscriber::processControlCommand() {
   std::lock_guard<std::mutex> lock(mutex_);
   if (!active_) {return;}
+  if (config_.unified_output)
+  {
+    processUnifiedCommand();
+    return;
+  }
   if (!has_command_ && !is_remote_control_) {return;}
   // 这是当前实现的输出冲突保护：检测多个发布者便清状态停发，不会主动取消导航来取得控制权。
   const auto publisher_count = node_.count_publishers(config_.output_topic);
@@ -194,10 +243,17 @@ void ChassisControlSubscriber::clearControlStateLocked() {
 
 // 将线／角输出再次按远程上限钳位，升降与货架旋转置零后发布 ControlRes。
 // 输出是 ROS 控制请求，不包含 UART 写入确认或实际轮速。
-void ChassisControlSubscriber::publishControl(const double linear_velocity, const double angular_velocity) {
+void ChassisControlSubscriber::publishControl(const double linear_velocity, const double angular_velocity)
+{
+  publishOutput(std::clamp(linear_velocity, -config_.linear_speed_max, config_.linear_speed_max), std::clamp(angular_velocity, -config_.angular_speed_max, config_.angular_speed_max));
+}
+
+// 导航速度已由原控制器／平滑器限制，不叠加遥控专用的 0.3 限速。
+void ChassisControlSubscriber::publishOutput(const double linear_velocity, const double angular_velocity)
+{
   byd_custom_msgs::msg::ControlRes output;
-  output.v = std::clamp(linear_velocity, -config_.linear_speed_max, config_.linear_speed_max);
-  output.w = std::clamp(angular_velocity, -config_.angular_speed_max, config_.angular_speed_max);
+  output.v = linear_velocity;
+  output.w = angular_velocity;
   output.v_lift = 0.0;
   output.w_rotation = 0.0;
   publisher_->publish(output);

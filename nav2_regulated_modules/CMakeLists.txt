@@ -37,6 +37,7 @@ add_executable(regulated_navigator_node
   src/regulated_navigator.cpp
   src/tf_diagnostics.cpp
   src/chassis_control_subscriber.cpp
+  src/chassis_control_authority.cpp
   src/motion_state_subscriber.cpp
   src/navigator_goal_handler.cpp
   src/navigator_planning.cpp
@@ -178,10 +179,14 @@ if(BUILD_TESTING)
   ament_target_dependencies(autonomous_fixed_path_test nav_msgs tf2 tf2_geometry_msgs)
   add_test(NAME autonomous_fixed_path_test COMMAND autonomous_fixed_path_test)
   find_package(Python3 REQUIRED COMPONENTS Interpreter)
+  add_test(NAME control_authority_launch_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/test_control_authority_launch.py)
+  add_test(NAME control_authority_runtime_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/control_authority_runtime.py)
+  set_tests_properties(control_authority_runtime_test PROPERTIES ENVIRONMENT "ROS_DOMAIN_ID=206;ROS_LOCALHOST_ONLY=1;ROS_LOG_DIR=/tmp/nav2-control-authority-ctest;SPDLOG_WRAPPER_LOG_DIR=/tmp/nav2-control-authority-ctest;PYTHONDONTWRITEBYTECODE=1" TIMEOUT 60 RUN_SERIAL TRUE)
   add_test(NAME collision_action_tool_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/test_collision_action_tool.py)
   add_test(NAME logging_routing_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/test_logging_routing.py)
   add_test(NAME velocity_logging_launch_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/velocity_logging_launch_test.py)
   add_test(NAME collision_launch_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/test_collision_launch.py)
+  add_test(NAME collision_module_launch_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/test_collision_module_launch.py)
   add_test(NAME autonomous_launch_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/test_autonomous_launch.py)
   add_test(NAME autonomous_fixed_launch_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/test_autonomous_fixed_launch.py)
   add_executable(autonomous_navigation_test test/autonomous_navigation_test.cpp)

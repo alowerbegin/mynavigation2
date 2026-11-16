@@ -26,17 +26,16 @@ source /opt/ros/humble/setup.bash
 colcon build --symlink-install --packages-up-to nav2_regulated_modules \
   --cmake-args -DBUILD_TESTING=OFF
 source install/local_setup.bash
-ros2 launch nav2_regulated_modules regulated_modules.launch.py \
-  operation_mode:=autonomous
+ros2 launch nav2_regulated_modules regulated_modules.launch.py
 ```
 
-`BUILD_TESTING=OFF` 适用于运行构建，不执行测试。模式启动后不能热切换；停止旧入口后再切换。
+`BUILD_TESTING=OFF` 适用于运行构建，不执行测试。直接入口默认 `fixed_path`，后台遥控常驻；遥控与路径之间交接不修改 `operation_mode`。其他模式仍需显式传入，模式本身不能热切换。
 
 | 模式 | 接受的任务输入 | 行为 |
 |---|---|---|
 | `remote` | 键盘终端 | 使用键盘包直接生成底盘 ControlRes；线／角速度默认限幅 0.3 m/s、0.3 rad/s |
-| `autonomous`（默认） | `/navigate_to_pose`、`/navigate_through_poses`、`/goal_pose` | regulated_navigator 调用 Planner／可选 Smoother／Controller，无行为树 |
-| `fixed_path` | `/navigation_service` | 由 NaviSegment[] 生成路径，使用专用控制器与目标检查器跟踪 |
+| `autonomous` | `/navigate_to_pose`、`/navigate_through_poses`、`/goal_pose` | regulated_navigator 调用 Planner／可选 Smoother／Controller，无行为树 |
+| `fixed_path`（直接入口默认） | `/navigation_service`、`/downstream/chassis_control` | 固定路径跟踪与后台遥控共用唯一底盘出口，遥控优先 |
 | `autonomous_fixed` | `/navigate_to_pose`、`/goal_pose`；拒绝多点 Action | Hybrid A*／REEDS_SHEPP 一次规划，冻结路径后分段跟踪，暂停恢复不重规划 |
 
 直接入口不启动 Gazebo、AMCL、合成 TF 或合成雷达。默认地图为 `/userdata/map/pbstream/out.yaml`；用 `map:=...` 覆盖。可用 `ros2 launch nav2_regulated_modules regulated_modules.launch.py --show-args` 查看安装版本支持的参数，实际值受 YAML、Launch 重写及显式实参共同影响。
@@ -226,13 +225,35 @@ autonomous: 导航目标 → regulated_navigator → Planner → 可选 Smoother
 fixed_path: NavigationService → 方向化 Path → FollowPath
 autonomous_fixed: 单点目标 → 一次 Hybrid 规划 → 冻结／分段 → FollowPath
 FollowPath → Controller Server → /cmd_vel_nav
-  → Velocity Smoother → /cmd_vel → controlpub → /control_to_uart
-启用 Collision Monitor 时：平滑器 → /cmd_vel_collision_in → Collision Monitor → /cmd_vel
+  → Velocity Smoother → /cmd_vel
+fixed_path：/cmd_vel → 导航器内统一出口 → /control_to_uart
+其他导航模式：/cmd_vel → controlpub → /control_to_uart
+后台遥控：/downstream/chassis_control → 同一个统一出口（fixed_path）
+启用 use_collision_velocity_gate 时：平滑器 → /cmd_vel_collision_in → Collision Monitor → /cmd_vel
 ```
 
 实车 YAML 和 `myworld_bringup` 仿真均将控制器、导航器速度观测及 `autonomous_fixed` 停稳判断、平滑器统一到 `/motion_state` 的 MotionState；导航器通过 `velocity_odom_topic` 显式配置。控制包装及导航器按反馈话题末段 `motion_state` 选择 MotionState，其余话题保留 Odometry 兼容；自定义参数文件若省略该字段，导航器仍沿用 C++ 默认 `/odometry`。`v_car/w_car` 映射到线／角速度并保留源 Header；反馈过期、定位缺失、取消和正常到点分别处理。TF 须提供新鲜 `map→base_link`，或由明确的 TF 链组合得到；不把原始里程计位置当作地图定位。
 
-`regulated_navigator` 另监听 `/downstream/chassis_control`，收到该支路有效命令才处理底盘请求。部署时须核对最终控制源，避免键盘直控与导航转发同时竞争 `/control_to_uart`。
+### fixed_path 后台遥控与统一控制权
+
+固定路径模式不启动 `controlpub`。导航器中的 `ChassisControlSubscriber` 统一接收最终 `/cmd_vel` 与 `/downstream/chassis_control`，以原 `chassis_publish_rate`（默认 100 Hz）向 `/control_to_uart` 发布唯一一路 `ControlRes`。普通导航速度保留原控制器、平滑器及可选碰撞速度门的输出，不受遥控专用 0.3 m/s／0.3 rad/s 上限二次钳位。该能力也适用于其他 Launch 显式选择 `fixed_path`；其他模式保留原输出链。
+
+| 场景 | 处理 |
+| --- | --- |
+| 启动空闲 | 统一出口发布零速；首个路径要求新鲜的 `/motion_state` 停稳反馈 |
+| 有效后台遥控 | 立即关闭导航输出，取消旧路径，上层 Action 返回 `ABORTED`、`finish=false`；等待所有已发送 FollowPath 被拒绝或返回终态，且交接后收到停稳反馈，才允许遥控运动 |
+| 遥控占用／交接／减速期间收到路径 | 拒绝；Goal 接受后控制权变化也会终止该 Goal |
+| 遥控超时 | 沿原遥控 S 曲线减速；规划速度和实测速度都停稳后释放控制权，不恢复旧路径 |
+| 再次下发路径 | 遥控已释放、下游已结束且反馈新鲜停稳时接受 |
+| 反馈失效／导航最终速度流超时／额外底盘发布者 | 保护性零速并取消导航；等待反馈恢复与停稳，不自动恢复旧任务 |
+
+后台继续使用原 `ChassisControl` 格式和 `op=0/1/2/3`，分别表示前进／后退／左转／右转。非法 op、负数或非有限速度／加速度会拒绝，不触发接管，也不刷新超时。速度字段为非负幅值；方向由 op 决定。
+
+现有 `chassis_command_timeout` 默认 0.15 s，持续遥控应周期发送有效指令，例如 20 Hz；交接等待期间也应继续发送。零速度消息同样表示遥控占用，后台要交还导航时须停止发送遥控消息，等待减速及停稳后再发新路径。不存在额外的运行模式参数设置。
+
+反馈新鲜度沿用 `chassis_motion_state_timeout`（默认 0.2 s，以本机单调接收时间计算）；统一出口也用它检测已开始的最终导航速度流是否中断。停稳阈值沿用线／角速度幅值均小于 0.001。交接与反馈故障的保护性零速不经过正常导航平滑斜坡，不据此保证实车制动距离或舒适性。遥控继续使用原专用 S 曲线，不经过导航碰撞速度门。下游无法返回终态时保持交接停车并拒绝新路径，不能仅凭取消请求接受就放行。
+
+`chassis_navigation_topic` 默认 `/cmd_vel`，`chassis_output_topic` 默认 `/control_to_uart`，自定义路由须与实际最终速度话题匹配。部署时确认 `/control_to_uart` 只有导航器一个发布者，不再另起 `controlpub`、键盘直控或另一套导航出口。
 
 自主反馈以请求目标的直线距离作为 `distance_remaining` 下界，并估计平移、终点航向及停稳时间；ETA 不直接当作成功计时。定位恢复与控制恢复分别计数，标准反馈报告两者总数，原控制恢复次数上限不变。自主 GoalChecker 每秒提供终点等待原因与误差／阈值／稳定时长，成功仍只由 FollowPath 的成功结果向上传递。标准 Nav2 Action 消息定义和固定路径反馈均保持。
 
@@ -248,15 +269,35 @@ FollowPath → Controller Server → /cmd_vel_nav
 
 ## collision 状态与 Collision Monitor
 
-两项功能独立：外部 `/collision_state` 门控接收 `std_msgs/msg/UInt8`；Collision Monitor 依据传感器区域过滤速度，本包不从激光自动生成外部 collision 状态。
+碰撞检测状态链与速度门独立。`use_collision_monitor=true` 启动动态区域和激光状态翻译器，输出 `/collision_state`（UInt8）及 `/obstacle_status_int`（Int32）；翻译器不发布 `/cmd_vel`。固定路径链按状态执行减速停车。`use_collision_velocity_gate=true` 才把 Collision Monitor 插入速度链。
 
 | 项目 | 直接规控入口 | `myworld_bringup/entry.launch.py` |
 |---|---|---|
-| `enable_collision_state` | 默认 true，仅 fixed_path 生效 | 默认 true，仅 fixed_path 生效 |
-| `use_collision_monitor` | 默认 false | 默认 false |
+| `enable_collision_state` | 默认 true，fixed_path／autonomous_fixed 生效 | 相同 |
+| `use_collision_monitor` | 检测状态链，默认 false | 检测状态链，默认 false |
+| `use_collision_velocity_gate` | 速度门，默认 false | 速度门，默认 false |
+| `use_obstacle_status` | 默认 true，总开关开启时启动翻译器 | 相同 |
+| `use_car_op_status_sim` | 默认 true；演示状态源，外部发布者出现时让位 | 相同 |
 | `use_collision_visualization` | 默认 true，导航模式 | 仅 fixed_path 默认 true，其他模式 false |
 
 `enable_collision_state` 由 Launch 转成三节点的 `collision_state_enabled`。项目 YAML 为 true；通用 C++ 节点独立运行的内置回退仍为 false，不能混写这两层默认值。自主和遥控模式不启用外部状态门控。
+
+旧命令若用 `use_collision_monitor:=true` 开启速度过滤，现在应改用 `use_collision_velocity_gate:=true`。仅启用状态链时保持速度门 false；两个开关均 false 时保留原速度路由。整车配置显式使用 `enable_stamped_cmd_vel=false`，与 `controlpub` 的裸 Twist 输入匹配。
+
+```bash
+# 实车：状态检测链；真实上层持续提供 /car_op_status，关闭演示状态源。
+ros2 launch nav2_regulated_modules regulated_modules.launch.py \
+  operation_mode:=fixed_path use_sim_time:=false \
+  use_collision_monitor:=true use_collision_velocity_gate:=false \
+  use_car_op_status_sim:=false scan_topic:=/c200_lidar_node/scan
+
+# 仿真：使用 /scan、sim 尺寸档和默认演示状态源。
+ros2 launch myworld_bringup entry.launch.py \
+  operation_mode:=autonomous_fixed use_collision_monitor:=true \
+  use_collision_velocity_gate:=false
+```
+
+实车雷达话题须按实际部署设置。状态链仍需有效雷达、TF 和 `/motion_state`；生产环境由上层发布正确的 `/car_op_status`，不能把默认状态 0 当作自动判断方向／载货。当前本地 autonomous_fixed 的 footprint 保持 1.2×0.9 m、膨胀半径 0.4 m；检测脚本 real 档车体为 1.2×0.8 m，自车点滤除默认外扩 0.05 m。车体尺寸、导航安全外廓及滤除范围用途不同，部署前分别核对。完整说明见[碰撞状态链](../nav2_collision_monitor/doc/OBSTACLE_STATUS.md)。
 
 | 有效状态 | 含义 | 相对任务速度上限 |
 |---|---|---:|

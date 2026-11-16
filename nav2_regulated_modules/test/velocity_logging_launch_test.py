@@ -15,7 +15,8 @@ for mode in ('fixed_path', 'autonomous', 'remote'):
         context = LaunchContext()
         context.launch_configurations.update({
             'params_file': str(path.parent.parent / 'params/regulated_modules.yaml'),
-            'namespace': '', 'use_collision_monitor': collision, 'use_sim_time': 'false',
+            'namespace': '', 'use_collision_monitor': 'false',
+            'use_collision_velocity_gate': collision, 'use_sim_time': 'false',
             'operation_mode': mode, 'log_dir': '/tmp/velocity-launch-test',
             'enable_velocity_diagnostics': 'true', 'velocity_file_log_frequency': '100.0',
             'velocity_console_log_frequency': '1.0'})

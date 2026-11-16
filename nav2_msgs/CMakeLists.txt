@@ -14,6 +14,7 @@ nav2_package()
 
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/CollisionMonitorState.msg"
+  "msg/ExclusionZoneDescription.msg"
   "msg/Costmap.msg"
   "msg/CostmapMetaData.msg"
   "msg/CostmapFilterInfo.msg"
@@ -28,6 +29,8 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/RouteEdge.msg"
   "msg/EdgeCost.msg"
   "srv/GetCostmap.srv"
+  "srv/AddExclusionZone.srv"
+  "srv/RemoveExclusionZone.srv"
   "srv/IsPathValid.srv"
   "srv/ClearCostmapExceptRegion.srv"
   "srv/ClearCostmapAroundRobot.srv"
