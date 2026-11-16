@@ -570,6 +570,7 @@ geometry_msgs::msg::TwistStamped FixedPathController::computeVelocityCommands(co
   if (std::abs(curvature) > 1e-6)
   {
     linear_magnitude = std::min(linear_magnitude, rotate_to_heading_angular_vel_ / std::abs(curvature));
+    linear_magnitude = std::min(linear_magnitude, std::sqrt(0.1 / std::abs(curvature)));
   }
   // 【固定减速度制动裕量】动态开启时按 abs(v)÷transition 从 low 插值到 high，达到过渡速度后固定 high。
   // 动态关闭、速度无效或选择自适应时，辅助函数返回 high；braking_reaction_distance 用于固定减速度制动。
