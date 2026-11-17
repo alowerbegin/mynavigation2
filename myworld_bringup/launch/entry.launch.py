@@ -144,6 +144,8 @@ def generate_launch_description():
         'operation_mode': operation_mode,
         # Scene planner selection stays in params_file, rather than the child Launch default.
         'autonomous_planner_id': '',
+        # hybrid keeps the existing fourth-mode planner; lattice switches to the state-lattice wrapper.
+        'autonomous_fixed_planner': LaunchConfiguration('autonomous_fixed_planner'),
         'autonomous_mppi_profile': LaunchConfiguration('autonomous_mppi_profile'),
         'use_path_smoother': PythonExpression(["'", operation_mode, "' not in ('fixed_path', 'autonomous_fixed')"]),
         'enable_localization_jump_detection': enable_localization_jump_detection,
@@ -199,6 +201,7 @@ def generate_launch_description():
         DeclareLaunchArgument('use_sim_time', default_value='false', description='Use system timestamps by default; true restores Gazebo simulation time'),
         DeclareLaunchArgument('map', default_value=default_map, description='Navigation modes share /userdata/map/pbstream/out.yaml; remote uses myworld2; explicit map overrides the default'),
         DeclareLaunchArgument('params_file', default_value=os.path.join(bringup_dir, 'params', 'myworld2.yaml'), description='Explicit simulation parameter file for isolated experiments'),
+        DeclareLaunchArgument('autonomous_fixed_planner', default_value='hybrid', description="autonomous_fixed planner: 'hybrid' (default, existing behaviour) or 'lattice' (state-lattice one-shot search)"),
         DeclareLaunchArgument('world_file', default_value=os.path.join(myworld_dir, 'world_only.sdf'), description='Explicit simulation SDF for isolated experiments'),
         DeclareLaunchArgument('ign_partition', default_value=default_ign_partition, description='Unique Ignition transport partition for this launch'),
         DeclareLaunchArgument('use_rviz', default_value='true', description='Whether to start RViz'),
