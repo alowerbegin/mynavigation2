@@ -962,6 +962,17 @@ def generate_launch_description():
                        '--no-passthrough']),
     ]
 
+    # 遥控模式单独启动键盘控制节点。
+    remote_control_cmd = Node(
+        condition=IfCondition(is_remote),
+        package='myagv_keyboard_control',
+        executable='myagv_keyboard_control_node',
+        name='myagv_keyboard_control',
+        output='both',
+        emulate_tty=True,
+        parameters=[configured_params, {'input_device': keyboard_input_device,
+                     'output_topic': '/control_to_uart'}])
+
     # 把导航相关节点及可选 Collision Monitor 组合成模式受控的启动组。
     navigation_group = GroupAction(
         condition=IfCondition(is_navigation),
@@ -1038,6 +1049,7 @@ def generate_launch_description():
     ld.add_action(OpaqueFunction(function=start_velocity_diagnostics))
     for node in status_nodes:
         ld.add_action(node)
+    ld.add_action(remote_control_cmd)
     ld.add_action(navigation_group)
 
     ld.add_action(LogInfo(condition=IfCondition(PythonExpression(["'", operation_mode, "' == 'autonomous'"])), msg=['Autonomous rates: controller=50Hz, smoother=50Hz, diagnostic=', LaunchConfiguration('velocity_file_log_frequency'), 'Hz, console=', LaunchConfiguration('velocity_console_log_frequency'), 'Hz; MPPI model_dt=0.02s/time_steps=75']))
