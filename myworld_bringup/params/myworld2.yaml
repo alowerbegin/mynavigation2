@@ -170,7 +170,11 @@ controller_server:
     stopped_goal_checker:
       stateful: False
       plugin: "nav2_controller::StoppedGoalChecker"
-      xy_goal_tolerance: 0.03
+      # Aligned with fixed_path_goal_checker 0.01 (was 0.03): the sole value both
+      # entry.launch.py used to override on top of YAML. This file is also loaded by
+      # navigation_launch.py, which only rewrites fixed_path_goal_checker, so any
+      # change here moves that path's stopped_goal_checker too.
+      xy_goal_tolerance: 0.01
       yaw_goal_tolerance: 0.15726646259971647
       trans_stopped_velocity: 0.01
       rot_stopped_velocity: 0.05
