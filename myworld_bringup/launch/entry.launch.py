@@ -49,8 +49,6 @@ def generate_launch_description():
     car_op_status_value = LaunchConfiguration('car_op_status_value', default='0')
     use_collision_visualization = LaunchConfiguration('use_collision_visualization', default=default_collision_visualization)
     headless = LaunchConfiguration('headless', default='true')
-    # fixed_path_* 与 enable_localization_jump_detection 的其它参数由子 Launch 直接从 params
-    # YAML 读取（regulated_modules.resolve_braking_margin_arguments：显式实参为空时回退 yaml）。
     navigation_stack_start_delay = LaunchConfiguration('navigation_stack_start_delay', default='3.0')
 
     is_navigation = PythonExpression(["'", operation_mode, "' != 'remote'"])
@@ -163,7 +161,7 @@ def generate_launch_description():
         DeclareLaunchArgument('headless', default_value='true', description='Run only the Ignition Gazebo server by default; false enables Gazebo GUI'),
         DeclareLaunchArgument('operation_mode', default_value='autonomous', choices=['remote', 'autonomous', 'fixed_path', 'autonomous_fixed'], description='Select the robot operation mode'),
         DeclareLaunchArgument('autonomous_mppi_profile', default_value='true', description='Apply rotation alignment, terminal approach and reduced MPPI sampling only in autonomous mode'),
-        DeclareLaunchArgument('navigation_stack_start_delay', default_value='3.0', description='Shared stack delay for sensors and external localization (s)'),
+        DeclareLaunchArgument('navigation_stack_start_delay', default_value=navigation_stack_start_delay, description='Shared stack delay for sensors and external localization (s)'),
 
         # Only sensors and velocity feedback cross the bridge. No Gazebo TF is
         # published; external localization must provide map -> base_link.
