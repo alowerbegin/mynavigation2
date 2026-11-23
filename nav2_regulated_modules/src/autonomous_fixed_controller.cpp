@@ -55,6 +55,9 @@ void AutonomousFixedPathController::configure(const rclcpp_lifecycle::LifecycleN
   max_angular_ = parameter("max_angular_velocity", 0.4);
   max_accel_ = parameter("max_angular_acceleration", 0.8);
   obstacle_timeout_ = parameter("obstacle_timeout", 60.0);
+  // 局部 Costmap 足迹停车开关：false时不再因代价地图障碍下发零速
+  nav2_util::declare_parameter_if_not_declared(node_, name + ".obstacle_check_enabled", rclcpp::ParameterValue(true));
+  obstacle_check_enabled_ = node_->get_parameter(name + ".obstacle_check_enabled").as_bool();
   localization_timeout_ = parameter("localization_timeout", 0.3);
   tracking_localization_timeout_ = parameter("tracking_localization_timeout", std::max(0.6, localization_timeout_));
   terminal_localization_distance_ = parameter("terminal_localization_distance", 0.5);
@@ -672,7 +675,8 @@ geometry_msgs::msg::TwistStamped AutonomousFixedPathController::computeVelocityC
     status(detail::fixedReviewPhaseName(phase));
   }
   command.twist = limitResumeCommand(command.twist, steady_time);
-  if (!trajectoryFree(pose, measured, command.twist))
+  // obstacle_check_enabled=false 时不基于局部 Costmap 的零速停车
+  if (obstacle_check_enabled_ && !trajectoryFree(pose, measured, command.twist))
   {
     ready_ = false;
     terminal_review_.reset();

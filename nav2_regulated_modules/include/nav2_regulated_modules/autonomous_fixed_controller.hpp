@@ -82,6 +82,7 @@ private:
   double max_angular_ = 0.4;
   double max_accel_ = 0.8;
   double obstacle_timeout_ = 60.0;
+  bool obstacle_check_enabled_ = true;
   double localization_timeout_ = 0.3;
   double tracking_localization_timeout_ = 0.6;
   double terminal_localization_distance_ = 0.5;
