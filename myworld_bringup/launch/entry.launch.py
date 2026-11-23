@@ -46,7 +46,9 @@ def generate_launch_description():
     use_collision_velocity_gate = LaunchConfiguration('use_collision_velocity_gate', default='false')
     use_obstacle_status = LaunchConfiguration('use_obstacle_status', default='true')
     use_car_op_status_sim = LaunchConfiguration('use_car_op_status_sim', default='true')
-    car_op_status_value = LaunchConfiguration('car_op_status_value', default='0')
+    # ooii: 新接口 RobotMoveState（uint8 九值 0–8）；默认 7 = 静止。
+    car_op_status_value = LaunchConfiguration('car_op_status_value', default='7')
+    car_op_status_topic = LaunchConfiguration('car_op_status_topic', default='/robot_move_state')
     use_collision_visualization = LaunchConfiguration('use_collision_visualization', default=default_collision_visualization)
     headless = LaunchConfiguration('headless', default='true')
     navigation_stack_start_delay = LaunchConfiguration('navigation_stack_start_delay', default='3.0')
@@ -156,8 +158,9 @@ def generate_launch_description():
         DeclareLaunchArgument('use_collision_velocity_gate', default_value='false', description='Start the Nav2 collision_monitor velocity gate separately; keep false when the status module is the intended collision behaviour'),
         DeclareLaunchArgument('use_collision_visualization', default_value=default_collision_visualization, description='Enable collision boundary visualization; defaults true for fixed_path, false for other modes'),
         DeclareLaunchArgument('use_obstacle_status', default_value='true', description='With use_collision_monitor: start obstacle_status_translator and publish /collision_state (UInt8) and /obstacle_status_int (Int32). The translator never publishes /cmd_vel'),
-        DeclareLaunchArgument('use_car_op_status_sim', default_value='true', description='With use_collision_monitor: start the default car_op_status_sim source. It yields while another /car_op_status publisher exists and resumes afterwards'),
-        DeclareLaunchArgument('car_op_status_value', default_value='0', description='car_op_status_sim hold value 0-8 (0 = idle forward)'),
+        DeclareLaunchArgument('use_car_op_status_sim', default_value='true', description='With use_collision_monitor: start the default RobotMoveState source. It yields while another publisher on car_op_status_topic exists and resumes afterwards'),
+        DeclareLaunchArgument('car_op_status_value', default_value='7', description='ooii: car_op_status_sim hold robot_move_state 0-8 (7 = stationary)'),
+        DeclareLaunchArgument('car_op_status_topic', default_value='/robot_move_state', description='ooii: byd_custom_msgs/RobotMoveState topic shared by the default source and car_op_zones'),
         DeclareLaunchArgument('headless', default_value='true', description='Run only the Ignition Gazebo server by default; false enables Gazebo GUI'),
         DeclareLaunchArgument('operation_mode', default_value='autonomous', choices=['remote', 'autonomous', 'fixed_path', 'autonomous_fixed'], description='Select the robot operation mode'),
         DeclareLaunchArgument('autonomous_mppi_profile', default_value='true', description='Apply rotation alignment, terminal approach and reduced MPPI sampling only in autonomous mode'),
@@ -194,7 +197,9 @@ def generate_launch_description():
              name='car_op_zones', output='screen',
              parameters=[{'use_sim_time': use_sim_time}],
              arguments=['--drive-monitor', '--frame-id', 'base_link', '--period', '0.1',
-                        '--profile', 'sim']),
+                        '--profile', 'sim',
+                        # ooii: 新接口 RobotMoveState；话题由 car_op_status_topic 统一。
+                        '--op-topic', car_op_status_topic]),
         # 默认状态源保住启动时的状态 0 边界框；它带 --yield-to-other-publishers，
         # 窗口 4 再起 car_op_status_sim 时会自动让位，退出后恢复，
         # 避免两个发布者同时发导致动态框跳闪。
@@ -205,7 +210,7 @@ def generate_launch_description():
              name='car_op_status_sim', output='screen',
              parameters=[{'use_sim_time': use_sim_time}],
              arguments=['--mode', 'hold', '--value', car_op_status_value,
-                        '--topic', '/car_op_status',
+                        '--topic', car_op_status_topic,
                         '--yield-to-other-publishers']),
         Node(condition=IfCondition(PythonExpression([
                  "'", use_collision_monitor, "'.lower() == 'true' and '",
