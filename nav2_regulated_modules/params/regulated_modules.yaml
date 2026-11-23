@@ -1,5 +1,12 @@
 # 规控包运行参数。各节点参数在下方逐项说明；标注的是本配置文件的当前设置，不等同于插件内置默认值。
 
+# autonomous_fixed 只由 launch 读取，不作为节点参数传给任何节点。
+autonomous_fixed_profile:
+  ros__parameters:
+    planner: hybrid
+    # false 关闭控制器基于 local_costmap 足迹的零速停车判据。
+    obstacle_check_enabled: true
+
 # 路径规划服务器：提供多种规划插件并按请求选择。
 planner_server:
   # 该 ROS 节点的参数集合。
@@ -1142,7 +1149,7 @@ global_costmap:
         # 该实例加载的插件类名。
         plugin: "nav2_costmap_2d::ObstacleLayer"
         # 是否启用当前评分器。
-        enabled: true
+        enabled: false
         # 是否使用机器人轮廓清除障碍。
         footprint_clearing_enabled: true
         # 碰撞监控或代价地图使用的传感器名称。

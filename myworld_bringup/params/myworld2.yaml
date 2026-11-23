@@ -4,6 +4,11 @@
 # map_saver, behavior_server, waypoint_follower, robot_state_publisher,
 # chassis_control_to_twist). localization_launch.py and mapping.launch.py still
 # read the amcl block from myworld2unused.yaml.
+autonomous_fixed_profile:
+  ros__parameters:
+    planner: lattice
+    # false 关闭控制器基于 local_costmap 足迹的零速停车判据。
+    obstacle_check_enabled: false
 regulated_navigator:
   ros__parameters:
     use_sim_time: True

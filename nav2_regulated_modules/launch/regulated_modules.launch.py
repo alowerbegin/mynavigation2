@@ -137,8 +137,10 @@ class NavigationRewrittenYaml(RewrittenYaml):
             document = yaml.safe_load(stream)
         namespace = perform_substitutions(context, normalize_to_list_of_substitutions(self.navigation_kwargs.get('root_key') or ''))
         config = document[namespace] if namespace else document
-        # 规划器开关：hybrid 保持第四模式原行为；lattice 改用状态格一次搜索。
-        fixed_planner = LaunchConfiguration('autonomous_fixed_planner', default='hybrid').perform(context).strip().lower()
+        # 规划器与 costmap 停车开关统一由 params_file 的 autonomous_fixed_profile 决定。
+        profile = (config.get('autonomous_fixed_profile') or {}).get('ros__parameters') or {}
+        fixed_planner = str(profile.get('planner', 'hybrid')).strip().lower()
+        obstacle_check_enabled = bool(profile.get('obstacle_check_enabled', True))
         if fixed_planner not in ('hybrid', 'lattice'):
             raise ValueError("autonomous_fixed_planner must be 'hybrid' or 'lattice'")
         use_lattice = fixed_planner == 'lattice'
@@ -150,7 +152,7 @@ class NavigationRewrittenYaml(RewrittenYaml):
             get_package_share_directory('nav2_smac_planner'),
             'sample_primitives', '5cm_resolution', '0.5m_turning_radius', 'diff', 'output.json')
         # Only this mode uses a rectangular envelope and wider obstacle cost field.
-        footprint = '[[0.4, 0.3], [0.4, -0.3], [-0.4, -0.3], [-0.4, 0.3]]' if use_lattice else '[[0.6, 0.45], [0.6, -0.45], [-0.6, -0.45], [-0.6, 0.45]]'
+        footprint = '[[0.6, 0.45], [0.6, -0.45], [-0.6, -0.45], [-0.6, 0.45]]' if use_lattice else '[[0.6, 0.45], [0.6, -0.45], [-0.6, -0.45], [-0.6, 0.45]]'
         inflation = 0.90 if use_lattice else 0.40
         for name in ['global_costmap', 'local_costmap']:
             costmap = config[name][name]['ros__parameters']
@@ -243,10 +245,12 @@ class NavigationRewrittenYaml(RewrittenYaml):
             'resume_distance': float(navigator.get('autonomous_fixed_resume_distance', 0.2)),
             'resume_linear_acceleration': 0.5,
             'obstacle_timeout': float(navigator.get('autonomous_fixed_obstacle_timeout', 60.0)),
+            'obstacle_check_enabled': obstacle_check_enabled,
         }
         final_yaw = lattice_yaw if use_lattice else float(navigator.get('autonomous_fixed_yaw_tolerance', 0.15726646259971647)) * 0.5
         cusp_xy = 0.02 if use_lattice else 0.01
-        for name, xy, yaw in [('autonomous_fixed_goal_checker', final_xy - endpoint_budget, final_yaw),
+        final_controller_xy = final_xy if use_lattice else final_xy - endpoint_budget
+        for name, xy, yaw in [('autonomous_fixed_goal_checker', final_controller_xy, final_yaw),
                               ('autonomous_fixed_cusp_checker', cusp_xy, 0.08726646259971647)]:
             controller[name] = {'plugin': 'nav2_controller::StoppedGoalChecker', 'stateful': False,
                                 'xy_goal_tolerance': xy, 'yaw_goal_tolerance': yaw,
@@ -1004,8 +1008,6 @@ def generate_launch_description():
                                        description='Autonomous planner ID; empty follows YAML, ignored outside autonomous mode'))
     ld.add_action(DeclareLaunchArgument('autonomous_mppi_profile', default_value='false',
                                        description='Use the simulation autonomous MPPI wrapper; ignored outside autonomous mode'))
-    ld.add_action(DeclareLaunchArgument('autonomous_fixed_planner', default_value='hybrid',
-                                       description="Planner for autonomous_fixed: 'hybrid' (default, existing behaviour) or 'lattice' (state-lattice one-shot search)"))
     ld.add_action(DeclareLaunchArgument('enable_legacy_velocity_logs', default_value='false'))
     ld.add_action(DeclareLaunchArgument('log_dir', default_value=EnvironmentVariable('SPDLOG_WRAPPER_LOG_DIR', default_value='/tmp/nav2_logs')))
     ld.add_action(DeclareLaunchArgument('velocity_file_log_frequency', default_value=PythonExpression(["'50.0' if '", LaunchConfiguration('operation_mode', default='fixed_path'), "' == 'autonomous' else '100.0'"])))
