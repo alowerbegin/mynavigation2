@@ -16,13 +16,6 @@ namespace nav2_regulated_modules
 {
 
 // 三种互斥入口：遥控不运行导航栈；自主与固定路径共用规控节点。
-enum class NavigationMode
-{
-  REMOTE,
-  AUTONOMOUS,
-  AUTONOMOUS_FIXED,
-  FIXED_PATH
-};
 
 // 单个任务的执行阶段；异步回调必须结合 generation 判断状态是否仍属于当前任务。
 enum class NavigationState
@@ -44,8 +37,6 @@ enum class TaskType
 {
   NONE,
   TO_POSE,
-  THROUGH_POSES,
-  TOPIC_GOAL,
   NAVIGATION_SERVICE
 };
 

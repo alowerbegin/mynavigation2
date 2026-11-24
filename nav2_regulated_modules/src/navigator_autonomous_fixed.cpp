@@ -235,7 +235,7 @@ void RegulatedNavigator::monitorFixedAutonomy()
         ++follow_sequence_;
         if (active_follow_goal_)
         {
-          follow_client_->async_cancel_goal(active_follow_goal_);
+          followClient()->async_cancel_goal(active_follow_goal_);
           active_follow_goal_.reset();
         }
         frozen_follow_inflight_ = false;
@@ -284,7 +284,7 @@ void RegulatedNavigator::monitorFixedAutonomy()
         return;
       }
       frozen_phase_ = "PLANNING";
-      startPlanning(false);
+      startPlanning();
     }
     else if (!planning_active_ && !frozen_path_.poses.empty())
     {

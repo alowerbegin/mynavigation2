@@ -34,17 +34,46 @@ bool ChassisControlSubscriber::canStartNavigation()
   return config_.navigation_active() || (config_.navigation_drained() && motionStopped(motion_state_subscriber_.latestState()));
 }
 
-void ChassisControlSubscriber::onNavigationVelocity(const geometry_msgs::msg::Twist::SharedPtr message)
+bool ChassisControlSubscriber::navigationOutputStopped(
+  const std::chrono::steady_clock::time_point since)
 {
-  if (!std::isfinite(message->linear.x) || !std::isfinite(message->angular.z))
-  {
-    return;
-  }
   std::lock_guard<std::mutex> lock(mutex_);
-  if (active_ && config_.navigation_active() && (authority_ == Authority::IDLE || authority_ == Authority::NAVIGATION))
+  const auto quiet = std::chrono::milliseconds(200);
+  const auto now = std::chrono::steady_clock::now();
+  for (const auto & sample : channel_velocity_)
   {
-    navigation_velocity_ = *message;
-    navigation_receive_time_ = std::chrono::steady_clock::now();
+    if (sample.last_nonzero + quiet > now ||
+      (!sample.stopped && sample.received != std::chrono::steady_clock::time_point{}))
+    {
+      return false;
+    }
+  }
+  return since + quiet <= now;
+}
+
+void ChassisControlSubscriber::onNavigationVelocity(
+  const int source, const geometry_msgs::msg::Twist & message)
+{
+  std::lock_guard<std::mutex> lock(mutex_);
+  auto & sample = channel_velocity_[source];
+  const auto received = std::chrono::steady_clock::now();
+  sample.received = received;
+  const bool finite = std::isfinite(message.linear.x) && std::isfinite(message.angular.z);
+  sample.stopped = finite && std::abs(message.linear.x) < 1e-3 &&
+    std::abs(message.angular.z) < 1e-3;
+  if (!sample.stopped)
+  {
+    sample.last_nonzero = received;
+  }
+  const int selected = config_.navigation_source ? config_.navigation_source() : 0;
+  if (finite && active_ && selected == source && config_.navigation_active() &&
+    (authority_ == Authority::IDLE || authority_ == Authority::NAVIGATION))
+  {
+    navigation_velocity_ = message;
+    navigation_receive_time_ = received;
+    cached_navigation_source_ = source;
+    cached_navigation_generation_ = config_.navigation_generation ?
+      config_.navigation_generation() : 0;
     has_navigation_velocity_ = true;
     authority_ = Authority::NAVIGATION;
   }
@@ -128,7 +157,10 @@ void ChassisControlSubscriber::processUnifiedCommand()
     }
     return;
   }
-  if (config_.navigation_active() && has_navigation_velocity_)
+  const int selected = config_.navigation_source ? config_.navigation_source() : 0;
+  const auto generation = config_.navigation_generation ? config_.navigation_generation() : 0;
+  if (config_.navigation_active() && has_navigation_velocity_ && selected >= 0 &&
+    selected == cached_navigation_source_ && generation == cached_navigation_generation_)
   {
     if (std::chrono::duration<double>(now - navigation_receive_time_).count() <= config_.motion_state_timeout)
     {

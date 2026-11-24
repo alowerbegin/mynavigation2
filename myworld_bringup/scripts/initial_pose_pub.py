@@ -19,6 +19,7 @@ class InitialPosePub(Node):
         super().__init__('initial_pose_pub')
         # 每次启动必定重定位的种子位姿：机器人停靠点在地图系 (map frame) 坐标，
         # 与 nav2_regulated_modules 测试工具里的 A 点 (9.16, -4.37) 一致。
+        self.declare_parameter('wait_for_subscriber', False)
         self.declare_parameter('x', 9.1631439)
         self.declare_parameter('y', -4.3752599)
         self.declare_parameter('yaw', -2.1613309)
@@ -59,6 +60,13 @@ class InitialPosePub(Node):
             f'Seeding {frame_id} pose ({x:.7f}, {y:.7f}, yaw {yaw:.7f}) on {topic}')
 
     def run(self):
+        if self.get_parameter('wait_for_subscriber').value:
+            deadline = time.monotonic() + 120.0
+            while rclpy.ok() and not self.publisher.get_subscription_count():
+                if time.monotonic() >= deadline:
+                    self.get_logger().error('定位节点未订阅初始位姿，未发布定位种子')
+                    return
+                rclpy.spin_once(self, timeout_sec=0.2)
         # Repeat briefly so a still-initializing external localizer does not miss the seed.
         for _ in range(self.publish_count):
             if not rclpy.ok():

@@ -9,6 +9,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include "lifecycle_msgs/srv/get_state.hpp"
 #include <string>
 #include <vector>
 
@@ -16,12 +17,9 @@
 #include "geometry_msgs/msg/twist.hpp"
 #include "byd_custom_msgs/action/navigation_service.hpp"
 #include "byd_custom_msgs/msg/navi_segment.hpp"
-#include "nav2_msgs/action/compute_path_through_poses.hpp"
 #include "nav2_msgs/action/compute_path_to_pose.hpp"
 #include "nav2_msgs/action/follow_path.hpp"
-#include "nav2_msgs/action/navigate_through_poses.hpp"
 #include "nav2_msgs/action/navigate_to_pose.hpp"
-#include "nav2_msgs/action/smooth_path.hpp"
 #include "nav2_msgs/srv/clear_entire_costmap.hpp"
 #include "nav2_regulated_modules/chassis_control_subscriber.hpp"
 #include "nav2_regulated_modules/control_module.hpp"
@@ -51,20 +49,14 @@ class RegulatedNavigator : public nav2_util::LifecycleNode
 {
   public:
   using ComputePathToPose = nav2_msgs::action::ComputePathToPose;
-  using ComputePathThroughPoses = nav2_msgs::action::ComputePathThroughPoses;
-  using SmoothPath = nav2_msgs::action::SmoothPath;
   using FollowPath = nav2_msgs::action::FollowPath;
   using NavigateToPose = nav2_msgs::action::NavigateToPose;
-  using NavigateThroughPoses = nav2_msgs::action::NavigateThroughPoses;
   using NavigationService = byd_custom_msgs::action::NavigationService;
   using ClearCostmap = nav2_msgs::srv::ClearEntireCostmap;
 
   using ComputePoseHandle = rclcpp_action::ClientGoalHandle<ComputePathToPose>;
-  using ComputePosesHandle = rclcpp_action::ClientGoalHandle<ComputePathThroughPoses>;
-  using SmoothHandle = rclcpp_action::ClientGoalHandle<SmoothPath>;
   using FollowHandle = rclcpp_action::ClientGoalHandle<FollowPath>;
   using NavigatePoseHandle = rclcpp_action::ServerGoalHandle<NavigateToPose>;
-  using NavigatePosesHandle = rclcpp_action::ServerGoalHandle<NavigateThroughPoses>;
   using NavigationServiceHandle = rclcpp_action::ServerGoalHandle<NavigationService>;
 
   // 仅声明运行参数；ROS 实体在 configure 建立，业务入口在 activate 后才允许接收。
@@ -123,22 +115,18 @@ private:
   rclcpp_action::GoalResponse handlePoseGoal(const rclcpp_action::GoalUUID & uuid, const std::shared_ptr<const NavigateToPose::Goal> goal);
   // 逐点检查非空目标序列的有效性，并拒绝行为树 XML 请求。
   // 多点任务的目标数量不等于已经计算出的路径点数量。
-  rclcpp_action::GoalResponse handlePosesGoal(const rclcpp_action::GoalUUID & uuid, const std::shared_ptr<const NavigateThroughPoses::Goal> goal);
   // 仅当句柄属于当前单点任务时置取消标记，随后由监控周期执行取消流程。
   // 返回 ACCEPT 表示接受取消请求，不是下游 FollowPath 的终态或停稳确认。
   rclcpp_action::CancelResponse handlePoseCancel(const std::shared_ptr<NavigatePoseHandle> goal);
   // 仅为当前多点任务设置取消标记，避免旧客户端取消新任务。
   // 该回调本身不等待规划、平滑或控制子 Goal 结束。
-  rclcpp_action::CancelResponse handlePosesCancel(const std::shared_ptr<NavigatePosesHandle> goal);
   // 先抢占现有任务，再递增 generation，保存目标并启动规划。
   // 旧子 Goal 以异步方式取消，旧回调靠代次过滤，不把句柄重置视为取消握手完成。
   void handlePoseAccepted(const std::shared_ptr<NavigatePoseHandle> goal);
   // 将多点目标复制到任务快照，末点作为最终目标，再发送多点规划请求。
   // 后续已通过目标可被移除，原始输入序列与当前待办序列应区分。
-  void handlePosesAccepted(const std::shared_ptr<NavigatePosesHandle> goal);
   // 将合法 goal_pose 纳入同一自主任务状态机，但没有对应上层 Action 结果句柄。
   // 非 autonomous 或未激活时忽略；接管同样递增任务代次。
-  void onTopicGoal(const geometry_msgs::msg::PoseStamped::SharedPtr goal);
   // 仅允许 fixed_path、节点激活、分段非空、全段同向且 max_speed 有限为正。
   // 几何连续性检查在接受后的 prepareFixedPath，故部分几何错误会以已接受后 ABORTED 结束。
   rclcpp_action::GoalResponse handleNavigationServiceGoal(const rclcpp_action::GoalUUID & uuid, const std::shared_ptr<const NavigationService::Goal> goal);
@@ -178,11 +166,10 @@ private:
   bool dependenciesReady();
   // 仅在 autonomous、任务有效且没有在途规划时提交请求。
   // generation 标识任务，plan_sequence 标识该任务的规划轮次；两者均匹配才接受回调。
-  void startPlanning(bool replanning);
+  void startPlanning();
   // 同时比较 generation 和规划 sequence，拒绝旧任务或旧规划轮次的异步结果。
   // 它不检查机器人位置或路径质量，只承担回调归属判断。
   bool isCurrentPlan(uint64_t generation, uint64_t sequence) const;
-  // 保存原始规划路径，按 use_smoother 决定是否发 SmoothPath。
   // 平滑拒绝、失败或返回空路径时回退原始 Path；不把回退当成平滑已成功。
   void onPathReady(const nav_msgs::msg::Path & path);
   // 累计连续规划失败；允许的周期重规划失败可继续旧 FollowPath。
@@ -223,12 +210,46 @@ private:
   // 依次处理取消、清图等待、TF 丢失／恢复、可选跳变、进度及自主重规划。
   // collision 仅暂停固定路径无进展计时，不跳过前面的取消与定位处理。
   void monitorTask();
+  bool unifiedDrained() const;
+  bool unifiedStopped() const;
+  bool admitUnified(bool lattice);
+  bool executionReady(bool lattice) const;
+  bool monitorUnified();
+  void pollExecutionStates();
+  void finishPending(bool client_cancel);
+  void finishCancellation();
+  void startFixedPath(const std::shared_ptr<NavigationServiceHandle> & goal,
+    nav_msgs::msg::Path path);
+  void startPose(const std::shared_ptr<NavigatePoseHandle> & goal);
+  rclcpp_action::Client<FollowPath>::SharedPtr followClient() const;
+  rclcpp::Publisher<nav2_msgs::msg::SpeedLimit>::SharedPtr speedPublisher() const;
+
+  using StateService = lifecycle_msgs::srv::GetState;
+  struct ExecutionNode
+  {
+    rclcpp::Client<StateService>::SharedPtr client;
+    bool active = false;
+    std::optional<int64_t> request;
+    std::chrono::steady_clock::time_point last_request;
+    std::chrono::steady_clock::time_point last_response;
+  };
+  std::vector<ExecutionNode> fixed_execution_;
+  std::vector<ExecutionNode> lattice_execution_;
+  std::shared_ptr<NavigatePoseHandle> pending_pose_;
+  std::shared_ptr<NavigationServiceHandle> pending_fixed_;
+  nav_msgs::msg::Path pending_path_;
+  std::chrono::steady_clock::time_point pending_since_;
+  std::chrono::steady_clock::time_point stopping_since_{};
+  std::string cancellation_reason_;
+  std::size_t outstanding_plans_ = 0;
+  rclcpp_action::Client<FollowPath>::SharedPtr lattice_follow_client_;
+  rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr lattice_stop_pub_;
+  rclcpp::Publisher<nav2_msgs::msg::SpeedLimit>::SharedPtr lattice_speed_pub_;
   // 自主模式同时检查 TF 源时间戳；固定路径保留最近变换查询与本机成功计时。
   // 新鲜定位仍不等于独立物理精度验收。
   bool lookupCurrentPose(geometry_msgs::msg::PoseStamped & pose);
   // 多点任务中按 passed_goal_radius（m）移除已接近的前置目标，至少保留末点。
   // 这是目标队列维护，不是 FollowPath 成功判定。
-  void updatePassedGoals(const geometry_msgs::msg::PoseStamped & current_pose);
 
   // 对已持有句柄发送 async_cancel_goal，再重置本地句柄；可选递增轮次使旧回调失效。
   // 未等待取消响应／结果，不能称为下游全部终止；尚未拿到句柄的请求也不由这些分支直接取消。
@@ -238,7 +259,6 @@ private:
   void cancelTask(const std::string & reason);
   // 新任务接管前使旧规划／跟踪轮次失效，发出取消与停车请求并 abort 旧上层任务。
   // 该流程不等待机械停稳，不应在注释中描述为已经完成安全控制权握手。
-  void preemptCurrentTask();
   // 向当前对应 Action 报告成功；固定路径另发 progress=1、finish=true 后清理任务。
   // 上层成功由下游结果触发，不直接证明外部精度验收、定位覆盖或真实底盘制动距离合格。
   void succeedTask();
@@ -252,7 +272,6 @@ private:
   // 业务状态与生命周期不是两个独立控制源：active_ 是上层回调放行条件，任务阶段另由 task_ 表示。
   bool active_ { false };
   bool planning_active_ { false };
-  bool updating_path_ { false };
   bool has_last_pose_ { false };
   bool cancel_requested_ { false };
   bool collision_state_enabled_ = false;
@@ -267,7 +286,6 @@ private:
   // 取消响应仅代表接受取消；须等待每个已发送 FollowPath 的拒绝或终态结果。
   std::size_t fixed_path_outstanding_follows_{0};
   NavigationTask task_;
-  NavigationMode operation_mode_ { NavigationMode::AUTONOMOUS };
   std::unique_ptr<MotionStateSubscriber> motion_state_subscriber_;
   std::unique_ptr<ChassisControlSubscriber> chassis_control_subscriber_;
   PlanningModule planning_module_;
@@ -275,7 +293,6 @@ private:
 
   std::string global_frame_;
   std::string robot_base_frame_;
-  std::string goal_topic_;
   std::string navigation_service_action_;
   std::string fixed_path_visualization_topic_;
   std::string fixed_path_boundaries_topic_;
@@ -333,25 +350,18 @@ private:
   bool has_velocity_odometry_ { false };
 
   rclcpp_action::Client<ComputePathToPose>::SharedPtr compute_pose_client_;
-  rclcpp_action::Client<ComputePathThroughPoses>::SharedPtr compute_poses_client_;
-  rclcpp_action::Client<SmoothPath>::SharedPtr smooth_client_;
   rclcpp_action::Client<FollowPath>::SharedPtr follow_client_;
   rclcpp_action::Server<NavigateToPose>::SharedPtr navigate_pose_server_;
-  rclcpp_action::Server<NavigateThroughPoses>::SharedPtr navigate_poses_server_;
   rclcpp_action::Server<NavigationService>::SharedPtr navigation_service_server_;
   rclcpp::Client<ClearCostmap>::SharedPtr clear_local_client_;
   rclcpp::Client<ClearCostmap>::SharedPtr clear_global_client_;
 
   // 这些句柄只在接受响应到达后可用；尚在等待接受的请求与已经持有句柄的任务需区分。
   ComputePoseHandle::SharedPtr active_compute_pose_goal_;
-  ComputePosesHandle::SharedPtr active_compute_poses_goal_;
-  SmoothHandle::SharedPtr active_smooth_goal_;
   FollowHandle::SharedPtr active_follow_goal_;
   std::shared_ptr<NavigatePoseHandle> active_pose_goal_;
-  std::shared_ptr<NavigatePosesHandle> active_poses_goal_;
   std::shared_ptr<NavigationServiceHandle> active_navigation_service_goal_;
 
-  rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr goal_sub_;
   rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr controller_velocity_sub_;
   rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr smoothed_velocity_sub_;
   rclcpp::SubscriptionBase::SharedPtr velocity_odom_sub_;

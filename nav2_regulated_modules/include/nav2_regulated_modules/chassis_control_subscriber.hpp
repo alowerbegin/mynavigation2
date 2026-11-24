@@ -203,6 +203,9 @@ struct ChassisControlConfig
   // 仅 fixed_path 启用；所有回调由导航器默认 MutuallyExclusive 回调组串行执行。
   bool unified_output{false};
   std::string navigation_topic{"/cmd_vel"};
+  std::string lattice_navigation_topic;
+  std::function<int()> navigation_source;
+  std::function<uint64_t()> navigation_generation;
   std::function<void()> request_takeover;
   std::function<bool()> navigation_active;
   std::function<bool()> navigation_drained;
@@ -244,6 +247,7 @@ class ChassisControlSubscriber
   void reset();
   // 遥控占用／交接中拒绝新路径；空闲起步必须有新鲜停稳反馈及下游终态。
   bool canStartNavigation();
+  bool navigationOutputStopped(std::chrono::steady_clock::time_point since);
 
 private:
   enum class Authority
@@ -254,7 +258,17 @@ private:
     REMOTE,
     STOPPING
   };
-  void onNavigationVelocity(const geometry_msgs::msg::Twist::SharedPtr message);
+  void onNavigationVelocity(int source, const geometry_msgs::msg::Twist & message);
+  struct ChannelVelocity
+  {
+    std::chrono::steady_clock::time_point received{};
+    std::chrono::steady_clock::time_point last_nonzero{};
+    bool stopped = false;
+  };
+  ChannelVelocity channel_velocity_[2];
+  int cached_navigation_source_ = -1;
+  uint64_t cached_navigation_generation_ = 0;
+  rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr lattice_navigation_subscription_;
   void processUnifiedCommand();
   bool motionFresh(const MotionStateSnapshot & state) const;
   bool motionStopped(const MotionStateSnapshot & state) const;

@@ -1,23 +1,19 @@
 # 三模式规控的 Launch 装配：解析实参、重写 YAML、选择节点集合，再交给生命周期管理器激活。
 # LaunchConfiguration 是延迟求值对象；OpaqueFunction 在上下文可用后读取真实参数，不能在生成描述时当普通字符串使用。
-# 当前模式仍互斥；启用开关、参数文件值和 C++ 回退默认需分层解释。
+# 协调器在收到 Action Goal 后分配控制权。
 
 import os
 import yaml
-import sys
 import math
 
 from ament_index_python.packages import get_package_share_directory
 
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, GroupAction, IncludeLaunchDescription, LogInfo, OpaqueFunction, SetEnvironmentVariable, SetLaunchConfiguration
-from launch.conditions import IfCondition, UnlessCondition
-from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch.actions import DeclareLaunchArgument, OpaqueFunction, SetEnvironmentVariable, SetLaunchConfiguration
+from launch.conditions import IfCondition
 from launch.substitutions import EnvironmentVariable, LaunchConfiguration, PythonExpression
 from launch.utilities import normalize_to_list_of_substitutions, perform_substitutions
-from launch_ros.actions import LoadComposableNodes, Node
-from launch_ros.descriptions import ComposableNode, ParameterFile
-from launch_ros.parameter_descriptions import ParameterValue
+from launch_ros.actions import Node
 from nav2_common.launch import RewrittenYaml
 
 
@@ -27,72 +23,6 @@ class NavigationRewrittenYaml(RewrittenYaml):
     def __init__(self, **kwargs):
         self.navigation_kwargs = kwargs
         super().__init__(**kwargs)
-
-    def perform(self, context):
-        if (LaunchConfiguration('operation_mode').perform(context) == 'fixed_path'
-                and LaunchConfiguration('adaptive_goal_braking_enabled', default='false').perform(context).lower() != 'true'):
-            return self.loaded_fixed_path_parameters(context)
-        if LaunchConfiguration('operation_mode').perform(context) == 'autonomous_fixed':
-            return self.fixed_parameters(context)
-        if LaunchConfiguration('operation_mode').perform(context) != 'autonomous':
-            return super().perform(context)
-        rewrites = dict(self.navigation_kwargs['param_rewrites'])
-        rewrites.update({
-            'controller_server.ros__parameters.controller_frequency': '50.0',
-            'controller_server.ros__parameters.MPPI.model_dt': '0.02',
-            'controller_server.ros__parameters.MPPI.time_steps': '75',
-            'controller_server.ros__parameters.MPPI.vx_max': '0.5',
-            'controller_server.ros__parameters.MPPI.visualize': 'true',
-            'controller_server.ros__parameters.MPPI.TrajectoryVisualizer.trajectory_step': '15',
-            'controller_server.ros__parameters.MPPI.TrajectoryVisualizer.time_step': '5',
-            'velocity_smoother.ros__parameters.smoothing_frequency': '50.0',
-            'controller_server.ros__parameters.progress_checker.plugin': 'nav2_controller::PoseProgressChecker',
-            'controller_server.ros__parameters.progress_checker.required_movement_radius': '0.05',
-            'controller_server.ros__parameters.progress_checker.required_movement_angle': '0.2',
-            'regulated_navigator.ros__parameters.progress_min_translation': '0.05',
-        })
-        autonomous_planner_id = LaunchConfiguration('autonomous_planner_id', default='SmacHybrid').perform(context).strip()
-        if autonomous_planner_id:
-            rewrites['regulated_navigator.ros__parameters.planner_id'] = autonomous_planner_id
-            # PlannerServer prioritizes selected_planner over the Action request.
-            rewrites['planner_server.ros__parameters.selected_planner'] = autonomous_planner_id
-        if LaunchConfiguration('autonomous_mppi_profile', default='false').perform(context).lower() == 'true':
-            source = perform_substitutions(context, normalize_to_list_of_substitutions(self.navigation_kwargs['source_file']))
-            with open(source, encoding='utf-8') as stream:
-                config = yaml.safe_load(stream) or {}
-            namespace = perform_substitutions(context, normalize_to_list_of_substitutions(self.navigation_kwargs.get('root_key') or ''))
-            config = config.get(namespace, config) if namespace else config
-            xy_tolerance = float(config['controller_server']['ros__parameters']['stopped_goal_checker']['xy_goal_tolerance'])
-            profile = {
-                'plugin': 'nav2_regulated_modules::AutonomousMPPIController',
-                'primary_controller': 'nav2_mppi_controller::MPPIController',
-                'batch_size': '300',
-                'angular_dist_threshold': '0.7853981633974483',
-                'angular_disengage_threshold': '0.17453292519943295',
-                'forward_sampling_distance': '0.5',
-                'rotate_to_heading_angular_vel': '0.5',
-                'max_angular_accel': '0.8',
-                'simulate_ahead_time': '0.5',
-                'rotate_to_goal_heading': 'true',
-                'closed_loop': 'true',
-                'autonomous_approach_distance': '1.0',
-                'autonomous_terminal_distance': '0.15',
-                'autonomous_terminal_max_linear_velocity': '0.05',
-                'autonomous_terminal_max_angular_velocity': '0.1',
-                'GoalAngleCritic.enabled': 'false',
-            }
-            for key in ['autonomous_terminal_distance', 'autonomous_terminal_max_linear_velocity', 'autonomous_terminal_max_angular_velocity']:
-                profile[key] = str(config['controller_server']['ros__parameters'].get('MPPI', {}).get(key, profile[key]))
-            rewrites.update({'controller_server.ros__parameters.MPPI.' + key: value for key, value in profile.items()})
-            rewrites.update({
-                'controller_server.ros__parameters.stopped_goal_checker.plugin': 'nav2_regulated_modules::AutonomousStoppedGoalChecker',
-                'controller_server.ros__parameters.stopped_goal_checker.stateful': 'false',
-                'controller_server.ros__parameters.stopped_goal_checker.settle_duration': '0.5',
-                'regulated_navigator.ros__parameters.autonomous_terminal_progress_enabled': 'true',
-                'regulated_navigator.ros__parameters.autonomous_terminal_xy_tolerance': str(xy_tolerance),
-                'regulated_navigator.ros__parameters.autonomous_terminal_distance': profile['autonomous_terminal_distance'],
-            })
-        return RewrittenYaml(**{**self.navigation_kwargs, 'param_rewrites': rewrites}).perform(context)
 
     def loaded_fixed_path_parameters(self, context):
         """Bound ordinary fixed-path longitudinal motion throughout the task."""
@@ -130,7 +60,7 @@ class NavigationRewrittenYaml(RewrittenYaml):
         return output.name
 
     def fixed_parameters(self, context):
-        """Fourth-mode profile; never rewrite the three existing mode profiles."""
+        """Build the one-shot Lattice execution profile."""
         import tempfile
         baseline = super().perform(context)
         with open(baseline, encoding='utf-8') as stream:
@@ -139,11 +69,7 @@ class NavigationRewrittenYaml(RewrittenYaml):
         config = document[namespace] if namespace else document
         # 规划器与 costmap 停车开关统一由 params_file 的 autonomous_fixed_profile 决定。
         profile = (config.get('autonomous_fixed_profile') or {}).get('ros__parameters') or {}
-        fixed_planner = str(profile.get('planner', 'hybrid')).strip().lower()
         obstacle_check_enabled = bool(profile.get('obstacle_check_enabled', True))
-        if fixed_planner not in ('hybrid', 'lattice'):
-            raise ValueError("autonomous_fixed_planner must be 'hybrid' or 'lattice'")
-        use_lattice = fixed_planner == 'lattice'
         # 状态格模式当前使用 diff 基元（16 headings，间隔 22.5deg，半格 11.25deg）。
         # 终点朝向阈值 9deg 沿用原 48-heading 配置，比该基元半格更严，末段朝向余量偏小。
         # hybrid 模式沿用原减半要求。
@@ -152,8 +78,8 @@ class NavigationRewrittenYaml(RewrittenYaml):
             get_package_share_directory('nav2_smac_planner'),
             'sample_primitives', '5cm_resolution', '0.5m_turning_radius', 'diff', 'output.json')
         # Only this mode uses a rectangular envelope and wider obstacle cost field.
-        footprint = '[[0.6, 0.45], [0.6, -0.45], [-0.6, -0.45], [-0.6, 0.45]]' if use_lattice else '[[0.6, 0.45], [0.6, -0.45], [-0.6, -0.45], [-0.6, 0.45]]'
-        inflation = 0.90 if use_lattice else 0.40
+        footprint = '[[0.6, 0.45], [0.6, -0.45], [-0.6, -0.45], [-0.6, 0.45]]'
+        inflation = 0.90
         for name in ['global_costmap', 'local_costmap']:
             costmap = config[name][name]['ros__parameters']
             costmap.update(footprint=footprint, footprint_padding=0.0)
@@ -176,39 +102,31 @@ class NavigationRewrittenYaml(RewrittenYaml):
                     [localization_timeout, tracking_localization_timeout, terminal_localization_distance])
                 or tracking_localization_timeout < localization_timeout):
             raise ValueError('autonomous_fixed localization timeouts and terminal distance must be positive; tracking timeout must cover the strict timeout')
-        navigator.update(operation_mode='autonomous_fixed',
-                         planner_id='SmacLattice' if use_lattice else 'SmacHybrid',
+        navigator.update(
+                         planner_id='SmacLattice',
                          controller_id='AutonomousFixedPathController',
                          goal_checker_id='autonomous_fixed_goal_checker', use_smoother=False,
                          progress_timeout=10.0, replan_frequency=1.0,
                          autonomous_fixed_xy_tolerance=final_xy,
                          # 中间段复核容差与 cusp goal checker 对齐；状态格模式的终点旋转会带来厘米级滑移。
-                         autonomous_fixed_cusp_xy_tolerance=0.02 if use_lattice else 0.01,
+                         autonomous_fixed_cusp_xy_tolerance=0.02,
                          # 分段判据必须与控制器一致，否则 navigator 认为的单段会被控制器再次切分。
-                         autonomous_fixed_rotation_distance=0.025 if use_lattice else 1e-6,
+                         autonomous_fixed_rotation_distance=0.025,
                          # 旋转段位置验收半径，与控制器 rotation_position_tolerance 保持一致。
-                         autonomous_fixed_rotation_position_tolerance=0.05 if use_lattice else 0.0,
+                         autonomous_fixed_rotation_position_tolerance=0.05,
                          autonomous_fixed_short_pause_timeout=short_pause_timeout,
                          autonomous_fixed_resume_stable_duration=resume_stable_duration,
                          autonomous_fixed_tracking_localization_timeout=tracking_localization_timeout,
                          autonomous_fixed_terminal_localization_distance=terminal_localization_distance)
         planner = config['planner_server']['ros__parameters']
-        if use_lattice:
-            # 基元允许倒车：冻结路径按换向切段，段间短拼接残差按旋转段处理。
-            # 内部平滑保持关闭，确保每个采样点保留自身状态格朝向。
-            planner['planner_plugins'] = ['SmacLattice']
-            planner['selected_planner'] = 'SmacLattice'
-            planner.setdefault('SmacLattice', {}).update(
-                plugin='nav2_regulated_modules::AutonomousLatticePlanner',
-                lattice_filepath=lattice_file, tolerance=endpoint_budget,
-                allow_reverse_expansion=True, max_planning_time=3.5, smooth_path=False)
-        else:
-            planner['planner_plugins'] = ['SmacHybrid']
-            planner['selected_planner'] = 'SmacHybrid'
-            planner['SmacHybrid'].update(plugin='nav2_regulated_modules::AutonomousFixedHybridPlanner',
-                                        motion_model_for_search='REEDS_SHEPP', tolerance=endpoint_budget,
-                                        minimum_turning_radius=0.40, max_planning_time=3.5, smooth_path=True,
-                                        lookup_table_size=10.0)
+        # 基元允许倒车：冻结路径按换向切段，段间短拼接残差按旋转段处理。
+        # 内部平滑保持关闭，确保每个采样点保留自身状态格朝向。
+        planner['planner_plugins'] = ['SmacLattice']
+        planner['selected_planner'] = 'SmacLattice'
+        planner.setdefault('SmacLattice', {}).update(
+            plugin='nav2_regulated_modules::AutonomousLatticePlanner',
+            lattice_filepath=lattice_file, tolerance=endpoint_budget,
+            allow_reverse_expansion=True, max_planning_time=3.5, smooth_path=False)
         controller = config['controller_server']['ros__parameters']
         controller.update(controller_frequency=100.0,
                           controller_plugins=['AutonomousFixedPathController'],
@@ -235,8 +153,8 @@ class NavigationRewrittenYaml(RewrittenYaml):
             'max_angular_velocity': 0.4, 'max_angular_acceleration': 0.8,
             # 状态格网格上的纯旋转基元可能残留几毫米位移，按 2.5 cm 归为旋转段；
             # 旋转段无位移可消除误差，位置验收放宽到 5 cm 以吸收格心量化。
-            'rotation_distance': 0.025 if use_lattice else 1e-6,
-            'rotation_position_tolerance': 0.05 if use_lattice else 0.0,
+            'rotation_distance': 0.025,
+            'rotation_position_tolerance': 0.05,
             'localization_timeout': localization_timeout,
             'tracking_localization_timeout': tracking_localization_timeout,
             'terminal_localization_distance': terminal_localization_distance,
@@ -247,9 +165,9 @@ class NavigationRewrittenYaml(RewrittenYaml):
             'obstacle_timeout': float(navigator.get('autonomous_fixed_obstacle_timeout', 60.0)),
             'obstacle_check_enabled': obstacle_check_enabled,
         }
-        final_yaw = lattice_yaw if use_lattice else float(navigator.get('autonomous_fixed_yaw_tolerance', 0.15726646259971647)) * 0.5
-        cusp_xy = 0.02 if use_lattice else 0.01
-        final_controller_xy = final_xy if use_lattice else final_xy - endpoint_budget
+        final_yaw = lattice_yaw
+        cusp_xy = 0.02
+        final_controller_xy = final_xy
         for name, xy, yaw in [('autonomous_fixed_goal_checker', final_controller_xy, final_yaw),
                               ('autonomous_fixed_cusp_checker', cusp_xy, 0.08726646259971647)]:
             controller[name] = {'plugin': 'nav2_controller::StoppedGoalChecker', 'stateful': False,
@@ -314,11 +232,10 @@ def resolve_braking_margin_arguments(context):
         actions.append(SetLaunchConfiguration('resolved_fixed_path_' + key, str(value)))
     controller = config.get('controller_server', {}).get('ros__parameters', {})
     navigator = config.get('regulated_navigator', {}).get('ros__parameters', {})
-    mode = LaunchConfiguration('operation_mode', default='fixed_path').perform(context)
     tolerance = LaunchConfiguration('fixed_path_xy_goal_tolerance', default='').perform(context).strip()
     for checker in ['fixed_path_goal_checker', 'stopped_goal_checker']:
         value = controller.get(checker, {}).get('xy_goal_tolerance', 0.01)
-        if tolerance and (checker == 'fixed_path_goal_checker' or mode == 'fixed_path'):
+        if tolerance and checker == 'fixed_path_goal_checker':
             value = float(tolerance)
         actions.append(SetLaunchConfiguration('resolved_' + checker + '_xy_goal_tolerance', str(value)))
     use_smoother = LaunchConfiguration('use_path_smoother', default='').perform(context).strip().lower()
@@ -347,54 +264,137 @@ def resolve_collision_state_arguments(context):
 
 # 诊断关闭时返回空 Action 列表；开启时从同份 YAML 提取真实反馈话题。
 # 只构造 Node 描述；是否真正启动由 Launch 执行阶段决定。
-def start_velocity_diagnostics(context):
-    if LaunchConfiguration('enable_velocity_diagnostics').perform(context).lower() != 'true':
-        return []
-    # 从同一参数文件解析实际反馈来源，不把控制器反馈误当作平滑器反馈。
-    with open(LaunchConfiguration('params_file').perform(context), encoding='utf-8') as stream:
-        config = yaml.safe_load(stream) or {}
-    namespace = LaunchConfiguration('namespace').perform(context)
-    config = config.get(namespace, config) if namespace else config
-    smoother = config.get('velocity_smoother', {}).get('ros__parameters', {})
-    navigator = config.get('regulated_navigator', {}).get('ros__parameters', {})
-    controller = config.get('controller_server', {}).get('ros__parameters', {})
-    # 诊断里的 use_collision_monitor 指速度门；状态模块不改变速度链话题。
-    collision = LaunchConfiguration('use_collision_velocity_gate').perform(context).lower() == 'true'
-    return [Node(package='nav2_regulated_modules', executable='velocity_diagnostics_node',
-                 name='velocity_diagnostics', output='both', parameters=[{
-                     'use_sim_time': ParameterValue(LaunchConfiguration('use_sim_time'), value_type=bool),
-                     'operation_mode': LaunchConfiguration('operation_mode'),
-                     'log_dir': LaunchConfiguration('log_dir'),
-                     'velocity_file_log_frequency': ParameterValue(LaunchConfiguration('velocity_file_log_frequency'), value_type=float),
-                     'velocity_console_log_frequency': ParameterValue(LaunchConfiguration('velocity_console_log_frequency'), value_type=float),
-                     'use_collision_monitor': collision,
-                     'smoother_output_topic': 'cmd_vel_collision_in' if collision else 'cmd_vel',
-                     'smoother_feedback_topic': smoother.get('odom_topic', 'odom'),
-                     'smoother_feedback_mode': smoother.get('feedback', 'OPEN_LOOP'),
-                     'chassis_output_topic': navigator.get('chassis_output_topic', '/control_to_uart'),
-                     'chassis_input_topic': navigator.get('chassis_input_topic', '/downstream/chassis_control'),
-                     'controller_feedback_topic': controller.get('odom_topic', 'odom'),
-                 }])]
+def launch_unified(context, rewrites, rviz):
+    """Prepare separate parameter sets and lifecycle groups for both Action routes."""
+    import tempfile
+
+    def arg(name):
+        return LaunchConfiguration(name).perform(context)
+
+    ns = arg('namespace').strip('/') if arg('use_namespace').lower() == 'true' else ''
+    prefix = '/' + ns + '/' if ns else '/'
+    source = arg('params_file')
+    substitutions = dict(rewrites)
+    enabled = arg('enable_collision_state').lower() == 'true'
+    for name in ('regulated_navigator', 'controller_server', 'velocity_smoother'):
+        substitutions[name + '.ros__parameters.collision_state_enabled'] = str(enabled).lower()
+    profiles = NavigationRewrittenYaml(
+        source_file=source, root_key='', param_rewrites=substitutions, convert_types=True)
+    # The unified entry always selects Lattice even if the legacy profile selects Hybrid.
+    adaptive = arg('adaptive_goal_braking_enabled').lower() == 'true'
+    fixed_yaml = (RewrittenYaml.perform(profiles, context) if adaptive else
+                  profiles.loaded_fixed_path_parameters(context))
+    lattice_yaml = profiles.fixed_parameters(context)
+
+    def load_profile(filename):
+        with open(filename, encoding='utf-8') as stream:
+            return yaml.safe_load(stream)
+
+    fixed = load_profile(fixed_yaml)
+    lattice = load_profile(lattice_yaml)
+    fixed_controller = fixed['controller_server']['ros__parameters']
+    fixed_controller['progress_checker']['movement_time_allowance'] = float(
+        arg('fixed_path_progress_timeout'))
+    fixed_controller['controller_plugins'] = [
+        fixed['regulated_navigator']['ros__parameters'].get(
+            'fixed_path_controller_id', 'FixedPathController')]
+    fixed_controller['goal_checker_plugins'] = [
+        fixed['regulated_navigator']['ros__parameters'].get(
+            'fixed_path_goal_checker_id', 'fixed_path_goal_checker')]
+    if adaptive:
+        fixed['velocity_smoother']['ros__parameters'].update(
+            max_decel=[-1.0, 0.0, -3.2], immediate_stop_on_zero_command=True)
+
+    commands = [rviz]
+    tf_remaps = [('tf', '/tf'), ('tf_static', '/tf_static')]
+    use_sim_time = arg('use_sim_time').lower() == 'true'
+    gate = arg('use_collision_velocity_gate').lower() == 'true'
+
+    def node(package, executable, name, namespace, params, remaps=()):
+        commands.append(Node(
+            package=package, executable=executable, name=name, namespace=namespace,
+            output='both', parameters=params, remappings=list(remaps),
+            respawn=arg('use_respawn').lower() == 'true',
+            arguments=['--ros-args', '--log-level', arg('log_level')]))
+
+    def manage(label, namespace, names):
+        node('nav2_lifecycle_manager', 'lifecycle_manager', 'lifecycle_manager_' + label,
+             namespace, [{'use_sim_time': use_sim_time, 'autostart':
+                          arg('autostart').lower() == 'true', 'node_names': names}])
+
+    node('nav2_map_server', 'map_server', 'map_server', ns,
+         [fixed['map_server']['ros__parameters']])
+    manage('map', ns, ['map_server'])
+
+    readiness = {}
+    for channel, profile in [('fixed_path_exec', fixed), ('lattice_exec', lattice)]:
+        channel_ns = prefix + channel
+        names = ['controller_server', 'velocity_smoother']
+        if channel == 'lattice_exec':
+            names.append('planner_server')
+        if gate:
+            names.append('collision_monitor')
+        for name in ('local_costmap', 'global_costmap'):
+            values = profile[name][name]['ros__parameters']
+            values['map_topic'] = prefix + 'map'
+        for name in ('controller_server', 'velocity_smoother'):
+            profile[name]['ros__parameters']['speed_limit_topic'] = 'speed_limit'
+        # Costmap2DROS is constructed inside its server and needs the fully qualified
+        # YAML keys carried in the same parameter file as the server node.
+        with tempfile.NamedTemporaryFile(
+                mode='w', prefix=channel + '-', suffix='.yaml', delete=False) as stream:
+            yaml.safe_dump({channel_ns.strip('/'): profile}, stream)
+            filename = stream.name
+        node('nav2_controller', 'controller_server', 'controller_server', channel_ns,
+             [filename], tf_remaps + [('cmd_vel', 'cmd_vel_nav')])
+        node('nav2_velocity_smoother', 'velocity_smoother', 'velocity_smoother', channel_ns,
+             [filename], [('cmd_vel', 'cmd_vel_nav'),
+                          ('cmd_vel_smoothed', 'cmd_vel_collision_in' if gate else 'cmd_vel')])
+        if channel == 'lattice_exec':
+            node('nav2_planner', 'planner_server', 'planner_server', channel_ns,
+                 [filename], tf_remaps)
+        if gate:
+            node('nav2_collision_monitor', 'collision_monitor', 'collision_monitor', channel_ns,
+                 [filename, {'cmd_vel_in_topic': 'cmd_vel_collision_in',
+                             'cmd_vel_out_topic': 'cmd_vel'}], tf_remaps)
+        manage('execution', channel_ns, names)
+        readiness[channel] = [channel_ns + '/' + name for name in names]
+
+    navigator = dict(fixed['regulated_navigator']['ros__parameters'])
+    lattice_navigator = lattice['regulated_navigator']['ros__parameters']
+    navigator.update({key: value for key, value in lattice_navigator.items()
+                      if key.startswith('autonomous_fixed_')})
+    navigator.update(
+        planner_id='SmacLattice', use_smoother=False,
+        enable_localization_jump_detection=arg('enable_localization_jump_detection').lower() == 'true',
+        progress_timeout=float(arg('fixed_path_progress_timeout')),
+        compute_path_to_pose_action='lattice_exec/compute_path_to_pose',
+        follow_path_action='fixed_path_exec/follow_path',
+        stop_cmd_vel_topic='fixed_path_exec/cmd_vel_nav',
+        speed_limit_topic='fixed_path_exec/speed_limit',
+        chassis_navigation_topic='fixed_path_exec/cmd_vel',
+        controller_cmd_vel_topic='lattice_exec/cmd_vel_nav',
+        smoothed_cmd_vel_topic='lattice_exec/cmd_vel',
+        fixed_execution_nodes=readiness['fixed_path_exec'],
+        lattice_execution_nodes=readiness['lattice_exec'] + [prefix + 'map_server'])
+    node('nav2_regulated_modules', 'regulated_navigator_node', 'regulated_navigator',
+         ns, [navigator], tf_remaps)
+    manage('navigator', ns, ['regulated_navigator'])
+    return commands
 
 
-# 创建启动实参声明与条件 Action，并返回 LaunchDescription。
-# 这里只描述启动关系；节点创建、参数替换与生命周期激活由 Launch 执行阶段完成。
 def generate_launch_description():
     bringup_dir = get_package_share_directory('nav2_regulated_modules')
-    launch_dir = os.path.dirname(__file__)
 
     namespace = LaunchConfiguration('namespace')
-    use_namespace = LaunchConfiguration('use_namespace')
     map_yaml_file = LaunchConfiguration('map')
     use_sim_time = LaunchConfiguration('use_sim_time')
     autostart = LaunchConfiguration('autostart')
-    params_file = LaunchConfiguration('params_file')
     rviz_config_file = LaunchConfiguration('rviz_config_file')
     use_rviz = LaunchConfiguration('use_rviz')
     # 与 entry.launch.py 相同的语义：use_collision_monitor 是碰撞检测模块总开关，
     # 速度门由独立的 use_collision_velocity_gate 控制。
     use_collision_monitor = LaunchConfiguration('use_collision_monitor', default='false')
-    use_collision_velocity_gate = LaunchConfiguration('use_collision_velocity_gate', default='false')
     use_obstacle_status = LaunchConfiguration('use_obstacle_status', default='true')
     use_car_op_status_sim = LaunchConfiguration('use_car_op_status_sim', default='true')
     # ooii: 新接口 RobotMoveState（uint8 九值 0–8）；默认 7 = 静止。
@@ -402,60 +402,16 @@ def generate_launch_description():
     car_op_status_topic = LaunchConfiguration('car_op_status_topic', default='/robot_move_state')
     scan_topic = LaunchConfiguration('scan_topic', default='/c200_lidar_node/scan')
     zone_frame = LaunchConfiguration('zone_frame', default='base_link')
-    use_collision_visualization = LaunchConfiguration('use_collision_visualization')
-    use_composition = LaunchConfiguration('use_composition')
-    container_name = LaunchConfiguration('container_name')
-    container_name_full = (namespace, '/', container_name)
-    use_respawn = LaunchConfiguration('use_respawn')
-    log_level = LaunchConfiguration('log_level')
-    operation_mode = LaunchConfiguration('operation_mode')
     legacy_velocity_logging = PythonExpression([
         "'", LaunchConfiguration('enable_legacy_velocity_logs'), "'.lower() == 'true' or '",
         LaunchConfiguration('enable_velocity_diagnostics'), "'.lower() != 'true'"])
     adaptive_goal_braking_enabled = LaunchConfiguration('adaptive_goal_braking_enabled')
-    enable_localization_jump_detection = LaunchConfiguration('enable_localization_jump_detection')
-    fixed_path_progress_timeout = LaunchConfiguration('fixed_path_progress_timeout')
-    default_keyboard_input_device = (os.ttyname(sys.stdin.fileno()) if sys.stdin.isatty() else '/dev/tty')
-    keyboard_input_device = LaunchConfiguration('keyboard_input_device')
-    # 遥控模式只启用遥控相关动作，不启动自主导航任务链。
-    is_remote = PythonExpression(["'", operation_mode, "' == 'remote'"])
-    # 自主或固定路径模式启用规划、跟踪及规控节点。
-    is_navigation = PythonExpression(["'", operation_mode, "' != 'remote'"])
-    # 启用速度门时把平滑速度送入监控输入，否则直接送到 cmd_vel。
-    # 状态模块不参与速度链，所以这里只看 use_collision_velocity_gate。
-    smoothed_cmd_vel_topic = PythonExpression(["'cmd_vel_collision_in' if '", use_collision_velocity_gate,"'.lower() == 'true' else 'cmd_vel'"])
-    # 固定路径采用独立进度超时，其余模式保持普通导航超时。
-    effective_progress_timeout = ParameterValue(
-        PythonExpression([fixed_path_progress_timeout, " if '", operation_mode,"' == 'fixed_path' else (120.0 if '", operation_mode, "' == 'autonomous_fixed' else 10.0)"]),value_type=float)
-    adaptive_fixed_path = PythonExpression(["'", operation_mode, "' == 'fixed_path' and '", adaptive_goal_braking_enabled, "'.lower() == 'true'"])
-    # 显式自适应分支保留既有覆盖；默认 fixed_path 限值由 NavigationRewrittenYaml 设置。
-    fixed_path_smoother_deceleration = ParameterValue([PythonExpression(["-1.0 if (", adaptive_fixed_path, ") else -2.0"]),0.0, -3.2], value_type=list[float])
-    fixed_path_immediate_stop = ParameterValue(adaptive_fixed_path, value_type=bool)
-    fixed_path_smoother_params = {
-        'max_decel': fixed_path_smoother_deceleration,
-        'immediate_stop_on_zero_command': fixed_path_immediate_stop,
-    }
-
-    # 普通导航必需的生命周期节点列表；按依赖顺序交给 Lifecycle Manager 激活。
-    lifecycle_nodes = [
-        'planner_server',
-        'controller_server',
-        'smoother_server',
-        'velocity_smoother',
-        'regulated_navigator',
-    ]
-
-    remappings = [('/tf', 'tf'),('/tf_static', 'tf_static')]
-
     param_substitutions = {
         **{node + '.ros__parameters.legacy_velocity_logging': legacy_velocity_logging
            for node in ['regulated_navigator', 'velocity_smoother']},
         **{node + '.ros__parameters.' + key: value
            for node in ['controller_server', 'velocity_smoother', 'regulated_navigator']
            for key, value in {
-               'collision_state_enabled': PythonExpression([
-                   "'", operation_mode, "' in ('fixed_path', 'autonomous_fixed') and '",
-                   LaunchConfiguration('enable_collision_state'), "'.lower() == 'true'"]),
                'collision_state_topic': LaunchConfiguration('resolved_collision_state_topic'),
                'collision_state_timeout': LaunchConfiguration('resolved_collision_state_timeout'),
            }.items()},
@@ -474,15 +430,6 @@ def generate_launch_description():
            for checker in ['fixed_path_goal_checker', 'stopped_goal_checker']},
         'regulated_navigator.ros__parameters.use_smoother': LaunchConfiguration('resolved_use_path_smoother'),
     }
-
-    # 用启动实参重写 YAML 中的时钟、自动激活和地图路径，并保留 ROS 参数类型。
-    configured_params = ParameterFile(
-        NavigationRewrittenYaml(
-            source_file=params_file,
-            root_key=namespace,
-            param_rewrites=param_substitutions,
-            convert_types=True),
-        allow_substs=True)
 
     stdout_linebuf_envvar = SetEnvironmentVariable('RCUTILS_LOGGING_BUFFERED_STREAM', '1')
 
@@ -515,24 +462,8 @@ def generate_launch_description():
         default_value=os.path.join(bringup_dir, 'params', 'regulated_modules.yaml'),
         description='Full path to the ROS 2 parameters file')
 
-    # 三种导航模式分别提供独立配置；显式指定文件时沿用用户选择。
-    declare_rviz_config_file_cmd = DeclareLaunchArgument(
-        'rviz_config_file',
-        default_value=[os.path.join(bringup_dir, 'rviz'), '/', PythonExpression([
-            "'", operation_mode, "' if '", operation_mode,
-            "' in ('autonomous_fixed', 'autonomous', 'fixed_path') else 'nav2_default_view'"
-        ]), '.rviz'],
-        description='Full path to the RViz config file')
-
-    # 导航默认由另一终端打开 RViz；遥控模式保留原默认值。
-    declare_use_rviz_cmd = DeclareLaunchArgument(
-        'use_rviz',
-        default_value=PythonExpression([
-            "'false' if '", operation_mode,
-            "' in ('autonomous_fixed', 'autonomous', 'fixed_path') else 'true'"
-        ]),
-        description='Whether to start RViz')
-
+    declare_rviz_config_file_cmd = DeclareLaunchArgument('rviz_config_file', default_value=os.path.join(bringup_dir,'rviz','unified.rviz'))
+    declare_use_rviz_cmd = DeclareLaunchArgument('use_rviz',default_value='false')
     # 碰撞检测模块总开关：与 entry.launch.py 一致，只发状态、不改速度。
     declare_use_collision_monitor_cmd = DeclareLaunchArgument(
         'use_collision_monitor',
@@ -589,19 +520,6 @@ def generate_launch_description():
         default_value='true',
         description='Automatically startup lifecycle nodes')
 
-    # 选择容器内组件加载或独立进程启动。
-    declare_use_composition_cmd = DeclareLaunchArgument(
-        'use_composition',
-        default_value='False',
-        description='Use composed bringup if true')
-
-    # 组合模式使用的组件容器名称。
-    declare_container_name_cmd = DeclareLaunchArgument(
-        'container_name',
-        default_value='nav2_regulated_container',
-        description='Container name used when composition is enabled')
-
-    # 独立进程异常退出时是否重启。
     declare_use_respawn_cmd = DeclareLaunchArgument(
         'use_respawn',
         default_value='False',
@@ -612,13 +530,6 @@ def generate_launch_description():
         'log_level',
         default_value='info',
         description='Log level')
-
-    # 选择 remote、autonomous 或 fixed_path；模式决定启动节点集合。
-    declare_operation_mode_cmd = DeclareLaunchArgument(
-        'operation_mode',
-        default_value='fixed_path',
-        choices=['remote', 'autonomous', 'fixed_path', 'autonomous_fixed'],
-        description='Robot operation mode')
 
     declare_adaptive_goal_braking_cmd = DeclareLaunchArgument(
         'adaptive_goal_braking_enabled',
@@ -637,301 +548,6 @@ def generate_launch_description():
         default_value='120.0',
         description='Maximum stationary time allowed in fixed_path mode')
 
-    # 指定键盘遥控设备；无交互终端时使用 /dev/tty。
-    declare_keyboard_input_device_cmd = DeclareLaunchArgument(
-        'keyboard_input_device',
-        default_value=default_keyboard_input_device,
-        description='Terminal device used by remote keyboard control')
-
-    # 按 use_rviz 条件引入独立 RViz 启动文件。
-    rviz_cmd = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
-            os.path.join(launch_dir, 'rviz_launch.py')),
-        condition=IfCondition(use_rviz),
-        launch_arguments={'namespace': namespace,
-                          'use_namespace': use_namespace,
-                          'rviz_config': rviz_config_file}.items())
-
-    # 独立进程模式启动地图服务节点。
-    map_server_cmd = Node(
-        package='nav2_map_server',
-        executable='map_server',
-        name='map_server',
-        output='both',
-        respawn=use_respawn,
-        respawn_delay=2.0,
-        parameters=[configured_params],
-        arguments=['--ros-args', '--log-level', log_level],
-        remappings=remappings)
-
-    # 管理地图服务的生命周期并等待地图就绪。
-    lifecycle_manager_map_cmd = Node(
-        package='nav2_lifecycle_manager',
-        executable='lifecycle_manager',
-        name='lifecycle_manager_localization',
-        output='both',
-        arguments=['--ros-args', '--log-level', log_level],
-        parameters=[{'use_sim_time': use_sim_time},
-                    {'autostart': autostart},
-                    {'node_names': ['map_server']}])
-
-    # 独立进程模式下按条件启动导航、平滑和监控节点。
-    load_nodes = GroupAction(
-        condition=IfCondition(PythonExpression(['not ', use_composition])),
-        actions=[
-            Node(
-                package='nav2_planner',
-                executable='planner_server',
-                name='planner_server',
-                output='both',
-                respawn=use_respawn,
-                respawn_delay=2.0,
-                parameters=[configured_params],
-                arguments=['--ros-args', '--log-level', log_level],
-                remappings=remappings),
-            Node(
-                package='nav2_controller',
-                executable='controller_server',
-                name='controller_server',
-                output='both',
-                respawn=use_respawn,
-                respawn_delay=2.0,
-                parameters=[
-                    configured_params,
-                    {'progress_checker.movement_time_allowance':
-                     effective_progress_timeout}],
-                arguments=['--ros-args', '--log-level', log_level],
-                remappings=remappings + [('cmd_vel', 'cmd_vel_nav')]),
-            Node(
-                package='nav2_smoother',
-                executable='smoother_server',
-                name='smoother_server',
-                output='both',
-                respawn=use_respawn,
-                respawn_delay=2.0,
-                parameters=[configured_params],
-                arguments=['--ros-args', '--log-level', log_level],
-                remappings=remappings),
-            Node(
-                condition=UnlessCondition(adaptive_fixed_path),
-                package='nav2_velocity_smoother',
-                executable='velocity_smoother',
-                name='velocity_smoother',
-                output='both',
-                respawn=use_respawn,
-                respawn_delay=2.0,
-                parameters=[configured_params],
-                arguments=['--ros-args', '--log-level', log_level],
-                remappings=remappings +
-                [('cmd_vel', 'cmd_vel_nav'),
-                 ('cmd_vel_smoothed', smoothed_cmd_vel_topic)]),
-            Node(
-                condition=IfCondition(adaptive_fixed_path),
-                package='nav2_velocity_smoother',
-                executable='velocity_smoother',
-                name='velocity_smoother',
-                output='both',
-                respawn=use_respawn,
-                respawn_delay=2.0,
-                parameters=[configured_params, fixed_path_smoother_params],
-                arguments=['--ros-args', '--log-level', log_level],
-                remappings=remappings +
-                [('cmd_vel', 'cmd_vel_nav'),
-                 ('cmd_vel_smoothed', smoothed_cmd_vel_topic)]),
-            Node(
-                condition=IfCondition(use_collision_velocity_gate),
-                package='nav2_collision_monitor',
-                executable='collision_monitor',
-                name='collision_monitor',
-                output='both',
-                respawn=use_respawn,
-                respawn_delay=2.0,
-                parameters=[
-                    configured_params,
-                    {
-                        'cmd_vel_in_topic': 'cmd_vel_collision_in',
-                        'cmd_vel_out_topic': 'cmd_vel',
-                    },
-                ],
-                arguments=['--ros-args', '--log-level', log_level],
-                remappings=remappings),
-            Node(
-                package='nav2_regulated_modules',
-                executable='regulated_navigator_node',
-                name='regulated_navigator',
-                output='both',
-                respawn=use_respawn,
-                respawn_delay=2.0,
-                parameters=[
-                    configured_params,
-                    {
-                        'operation_mode': operation_mode,
-                        'enable_localization_jump_detection': ParameterValue(
-                            enable_localization_jump_detection,
-                            value_type=bool),
-                        'progress_timeout': effective_progress_timeout,
-                    },
-                ],
-                arguments=['--ros-args', '--log-level', log_level],
-                remappings=remappings),
-            Node(
-                condition=UnlessCondition(PythonExpression(["'", operation_mode, "' == 'fixed_path'"])),
-                package='controlpub',
-                executable='controlpub_node',
-                name='controlpub',
-                output='both',
-                parameters=[{'input_topic': '/cmd_vel'},
-                            {'output_topic': '/control_to_uart',
-                             'legacy_velocity_logging': ParameterValue(legacy_velocity_logging, value_type=bool)}]),
-            Node(
-                package='nav2_lifecycle_manager',
-                executable='lifecycle_manager',
-                name='lifecycle_manager_regulated_modules',
-                output='both',
-                arguments=['--ros-args', '--log-level', log_level],
-                parameters=[{'use_sim_time': use_sim_time},
-                            {'autostart': autostart},
-                            {'node_names': lifecycle_nodes}]),
-            Node(
-                condition=IfCondition(use_collision_velocity_gate),
-                package='nav2_lifecycle_manager',
-                executable='lifecycle_manager',
-                name='lifecycle_manager_collision_monitor',
-                output='both',
-                arguments=['--ros-args', '--log-level', log_level],
-                parameters=[{'use_sim_time': use_sim_time},
-                            {'autostart': autostart},
-                            {'node_names': ['collision_monitor']}]),
-        ])
-
-    # 组合部署使用以下组件列表；固定路径且自适应制动启用时，为平滑器追加 fixed_path_smoother_params。
-    composable_node_descriptions = [
-            ComposableNode(
-                package='nav2_planner',
-                plugin='nav2_planner::PlannerServer',
-                name='planner_server',
-                parameters=[configured_params],
-                remappings=remappings),
-            ComposableNode(
-                package='nav2_controller',
-                plugin='nav2_controller::ControllerServer',
-                name='controller_server',
-                parameters=[
-                    configured_params,
-                    {'progress_checker.movement_time_allowance':
-                     effective_progress_timeout}],
-                remappings=remappings + [('cmd_vel', 'cmd_vel_nav')]),
-            ComposableNode(
-                package='nav2_smoother',
-                plugin='nav2_smoother::SmootherServer',
-                name='smoother_server',
-                parameters=[configured_params],
-                remappings=remappings),
-            ComposableNode(
-                package='nav2_velocity_smoother',
-                plugin='nav2_velocity_smoother::VelocitySmoother',
-                name='velocity_smoother',
-                parameters=[configured_params],
-                remappings=remappings +
-                [('cmd_vel', 'cmd_vel_nav'),
-                 ('cmd_vel_smoothed', smoothed_cmd_vel_topic)]),
-            ComposableNode(
-                condition=IfCondition(use_collision_velocity_gate),
-                package='nav2_collision_monitor',
-                plugin='nav2_collision_monitor::CollisionMonitor',
-                name='collision_monitor',
-                parameters=[
-                    configured_params,
-                    {
-                        'cmd_vel_in_topic': 'cmd_vel_collision_in',
-                        'cmd_vel_out_topic': 'cmd_vel',
-                    },
-                ],
-                remappings=remappings),
-            ComposableNode(
-                package='nav2_lifecycle_manager',
-                plugin='nav2_lifecycle_manager::LifecycleManager',
-                name='lifecycle_manager_regulated_modules',
-                parameters=[{'use_sim_time': use_sim_time,
-                             'autostart': autostart,
-                             'node_names': lifecycle_nodes}]),
-            ComposableNode(
-                condition=IfCondition(use_collision_velocity_gate),
-                package='nav2_lifecycle_manager',
-                plugin='nav2_lifecycle_manager::LifecycleManager',
-                name='lifecycle_manager_collision_monitor',
-                parameters=[{'use_sim_time': use_sim_time,
-                             'autostart': autostart,
-                             'node_names': ['collision_monitor']}]),
-        ]
-
-    adaptive_composable_node_descriptions = composable_node_descriptions.copy()
-    adaptive_composable_node_descriptions[3] = ComposableNode(
-        package='nav2_velocity_smoother',
-        plugin='nav2_velocity_smoother::VelocitySmoother',
-        name='velocity_smoother',
-        parameters=[configured_params, fixed_path_smoother_params],
-        remappings=remappings +
-        [('cmd_vel', 'cmd_vel_nav'),
-         ('cmd_vel_smoothed', smoothed_cmd_vel_topic)])
-    load_composable_nodes = LoadComposableNodes(
-        condition=IfCondition(PythonExpression(["'", use_composition, "'.lower() == 'true' and not (", adaptive_fixed_path, ")"])),
-        target_container=container_name_full,
-        composable_node_descriptions=composable_node_descriptions)
-    load_adaptive_composable_nodes = LoadComposableNodes(
-        condition=IfCondition(PythonExpression(["'", use_composition, "'.lower() == 'true' and (", adaptive_fixed_path, ")"])),
-        target_container=container_name_full,
-        composable_node_descriptions=adaptive_composable_node_descriptions)
-
-    # 启动本包规控协调节点并传入任务模式、超时与定位参数。
-    start_regulated_navigator_cmd = Node(
-        condition=IfCondition(use_composition),
-        package='nav2_regulated_modules',
-        executable='regulated_navigator_node',
-        name='regulated_navigator',
-        output='both',
-        parameters=[
-            configured_params,
-            {
-                'operation_mode': operation_mode,
-                'enable_localization_jump_detection': ParameterValue(
-                    enable_localization_jump_detection,
-                    value_type=bool),
-                'progress_timeout': effective_progress_timeout,
-            },
-        ],
-        arguments=['--ros-args', '--log-level', log_level],
-        remappings=remappings)
-
-    # 启动底盘控制出口，把内部控制命令转换为串口输出。
-    start_controlpub_cmd = Node(
-        condition=IfCondition(PythonExpression(["'", use_composition, "'.lower() == 'true' and '", operation_mode, "' != 'fixed_path'"])),
-        package='controlpub',
-        executable='controlpub_node',
-        name='controlpub',
-        output='both',
-        parameters=[{'input_topic': '/cmd_vel'},
-                    {'output_topic': '/control_to_uart',
-                     'legacy_velocity_logging': ParameterValue(legacy_velocity_logging, value_type=bool)}])
-
-    # 边界显示独立于碰撞判定；按配置的多边形话题生成 Marker。
-    # 外部可视化按话题动态分配 Marker；默认订阅 Stop、Slowdown 和 L1。
-    collision_boundary_visualizer_cmd = Node(
-        condition=IfCondition(use_collision_visualization),
-        package='nav2_regulated_modules',
-        executable='collision_boundary_visualizer_node',
-        name='collision_boundary_visualizer',
-        output='both',
-        parameters=[{'polygon_topics': [
-            'collision_stop_zone',
-            'collision_slowdown_zone',
-            'collision_slowdown_l1',
-        ]}])
-
-    # 碰撞检测状态链：use_collision_monitor 为总开关，只发 /collision_state 与
-    # /obstacle_status_int，不发布 /cmd_vel；use_obstacle_status 只控制 translator。
-    # 与 nav2_collision_monitor/launch/obstacle_status.launch.py 保持同一套语义，
-    # 实车不要同时启动两处，否则会出现同名节点和双发布者。
     status_nodes = [
         Node(
             condition=IfCondition(use_collision_monitor),
@@ -974,44 +590,22 @@ def generate_launch_description():
                        '--profile', 'real',
                        '--no-passthrough']),
     ]
-
-    # 遥控模式单独启动键盘控制节点。
-    remote_control_cmd = Node(
-        condition=IfCondition(is_remote),
-        package='myagv_keyboard_control',
-        executable='myagv_keyboard_control_node',
-        name='myagv_keyboard_control',
-        output='both',
-        emulate_tty=True,
-        parameters=[configured_params, {'input_device': keyboard_input_device,
-                     'output_topic': '/control_to_uart'}])
-
-    # 把导航相关节点及可选 Collision Monitor 组合成模式受控的启动组。
-    navigation_group = GroupAction(
-        condition=IfCondition(is_navigation),
-        actions=[
-            rviz_cmd,
-            map_server_cmd,
-            lifecycle_manager_map_cmd,
-            load_nodes,
-            load_composable_nodes,
-            load_adaptive_composable_nodes,
-            start_regulated_navigator_cmd,
-            start_controlpub_cmd,
-            collision_boundary_visualizer_cmd,
-        ])
-
+    panel_remaps = [
+        (old + '/' + service, new + '/' + service)
+        for old, new in [('lifecycle_manager_navigation', 'lifecycle_manager_navigator'),
+                         ('lifecycle_manager_localization', 'lifecycle_manager_map')]
+        for service in ('is_active', 'manage_nodes')]
+    rviz_cmd = Node(
+        package='rviz2', executable='rviz2', condition=IfCondition(use_rviz),
+        namespace=PythonExpression(["'", namespace, "' if '", LaunchConfiguration('use_namespace'),
+                                    "'.lower() == 'true' else ''"]),
+        arguments=['-d', rviz_config_file], parameters=[{'use_sim_time': use_sim_time}],
+        remappings=panel_remaps)
     ld = LaunchDescription()
 
     ld.add_action(DeclareLaunchArgument('enable_velocity_diagnostics', default_value='true'))
-    ld.add_action(DeclareLaunchArgument('autonomous_planner_id', default_value='SmacHybrid',
-                                       description='Autonomous planner ID; empty follows YAML, ignored outside autonomous mode'))
-    ld.add_action(DeclareLaunchArgument('autonomous_mppi_profile', default_value='false',
-                                       description='Use the simulation autonomous MPPI wrapper; ignored outside autonomous mode'))
     ld.add_action(DeclareLaunchArgument('enable_legacy_velocity_logs', default_value='false'))
     ld.add_action(DeclareLaunchArgument('log_dir', default_value=EnvironmentVariable('SPDLOG_WRAPPER_LOG_DIR', default_value='/tmp/nav2_logs')))
-    ld.add_action(DeclareLaunchArgument('velocity_file_log_frequency', default_value=PythonExpression(["'50.0' if '", LaunchConfiguration('operation_mode', default='fixed_path'), "' == 'autonomous' else '100.0'"])))
-    ld.add_action(DeclareLaunchArgument('velocity_console_log_frequency', default_value='1.0'))
     ld.add_action(stdout_linebuf_envvar)
     ld.add_action(spdlog_log_dir_envvar)
     ld.add_action(spdlog_console_level_envvar)
@@ -1036,7 +630,6 @@ def generate_launch_description():
                                        description='Position tolerance override; empty uses parameter YAML'))
     ld.add_action(DeclareLaunchArgument('use_path_smoother', default_value='',
                                        description='Override navigator path smoothing; empty uses parameter YAML'))
-    ld.add_action(declare_operation_mode_cmd)
     ld.add_action(declare_rviz_config_file_cmd)
     ld.add_action(declare_use_rviz_cmd)
     ld.add_action(declare_use_collision_monitor_cmd)
@@ -1049,20 +642,13 @@ def generate_launch_description():
     ld.add_action(declare_zone_frame_cmd)
     ld.add_action(declare_use_collision_visualization_cmd)
     ld.add_action(declare_autostart_cmd)
-    ld.add_action(declare_use_composition_cmd)
-    ld.add_action(declare_container_name_cmd)
     ld.add_action(declare_use_respawn_cmd)
     ld.add_action(declare_log_level_cmd)
     ld.add_action(OpaqueFunction(function=resolve_braking_margin_arguments))
     ld.add_action(declare_adaptive_goal_braking_cmd)
     ld.add_action(declare_enable_localization_jump_detection_cmd)
     ld.add_action(declare_fixed_path_progress_timeout_cmd)
-    ld.add_action(declare_keyboard_input_device_cmd)
-    ld.add_action(OpaqueFunction(function=start_velocity_diagnostics))
+    ld.add_action(OpaqueFunction(function=launch_unified, kwargs={'rewrites':param_substitutions,'rviz':rviz_cmd}))
     for node in status_nodes:
         ld.add_action(node)
-    ld.add_action(remote_control_cmd)
-    ld.add_action(navigation_group)
-
-    ld.add_action(LogInfo(condition=IfCondition(PythonExpression(["'", operation_mode, "' == 'autonomous'"])), msg=['Autonomous rates: controller=50Hz, smoother=50Hz, diagnostic=', LaunchConfiguration('velocity_file_log_frequency'), 'Hz, console=', LaunchConfiguration('velocity_console_log_frequency'), 'Hz; MPPI model_dt=0.02s/time_steps=75']))
     return ld

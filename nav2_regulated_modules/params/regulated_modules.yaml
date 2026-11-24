@@ -203,7 +203,6 @@ regulated_navigator:
     # 机器人车体参考坐标系。
     robot_base_frame: "base_link"
     # 规控运行模式；启动入口可按任务覆盖。
-    operation_mode: "autonomous"
     # 普通位姿目标订阅话题。
     goal_topic: "goal_pose"
     # 多段导航服务 Action 名称。

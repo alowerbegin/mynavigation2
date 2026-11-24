@@ -12,6 +12,7 @@ find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(rclcpp_action REQUIRED)
 find_package(rclcpp_lifecycle REQUIRED)
+find_package(lifecycle_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(nav2_core REQUIRED)
 find_package(nav2_costmap_2d REQUIRED)
@@ -40,6 +41,7 @@ add_executable(regulated_navigator_node
   src/chassis_control_authority.cpp
   src/motion_state_subscriber.cpp
   src/navigator_goal_handler.cpp
+  src/navigator_unified.cpp
   src/navigator_planning.cpp
   src/navigator_fixed_path.cpp
   src/navigator_autonomous_fixed.cpp
@@ -57,6 +59,7 @@ ament_target_dependencies(regulated_navigator_node
   rclcpp
   rclcpp_action
   rclcpp_lifecycle
+  lifecycle_msgs
   geometry_msgs
   nav2_msgs
   nav2_util

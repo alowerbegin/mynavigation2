@@ -15,8 +15,6 @@ namespace nav2_regulated_modules
 void RegulatedNavigator::cancelSubGoals(const bool invalidate_callbacks)
 {
   const bool had_compute_pose = active_compute_pose_goal_ != nullptr;
-  const bool had_compute_poses = active_compute_poses_goal_ != nullptr;
-  const bool had_smooth = active_smooth_goal_ != nullptr;
   const bool had_follow = active_follow_goal_ != nullptr;
   if (invalidate_callbacks)
   {
@@ -30,24 +28,14 @@ void RegulatedNavigator::cancelSubGoals(const bool invalidate_callbacks)
     compute_pose_client_->async_cancel_goal(active_compute_pose_goal_);
     active_compute_pose_goal_.reset();
   }
-  if (active_compute_poses_goal_)
-  {
-    compute_poses_client_->async_cancel_goal(active_compute_poses_goal_);
-    active_compute_poses_goal_.reset();
-  }
-  if (active_smooth_goal_)
-  {
-    smooth_client_->async_cancel_goal(active_smooth_goal_);
-    active_smooth_goal_.reset();
-  }
   if (active_follow_goal_)
   {
-    follow_client_->async_cancel_goal(active_follow_goal_);
+    followClient()->async_cancel_goal(active_follow_goal_);
     active_follow_goal_.reset();
   }
-  if (had_compute_pose || had_compute_poses || had_smooth || had_follow)
+  if (had_compute_pose || had_follow)
   {
-    LOG_DEBUG("取消子 Goal，compute_pose={}，compute_poses={}，smooth={}，follow={}，invalidate_callbacks={}", had_compute_pose, had_compute_poses, had_smooth, had_follow, invalidate_callbacks);
+    LOG_DEBUG("取消子 Goal，compute_pose={}，follow={}，invalidate_callbacks={}", had_compute_pose, had_follow, invalidate_callbacks);
   }
 }
 
@@ -59,13 +47,30 @@ void RegulatedNavigator::cancelTask(const std::string & reason)
   {
     return;
   }
-  const auto generation = task_.generation;
+  if (active_)
+  {
+    if (task_.state != NavigationState::CANCELING)
+    {
+      task_.state = NavigationState::CANCELING;
+      cancellation_reason_ = reason;
+      stopping_since_ = std::chrono::steady_clock::now();
+      cancelSubGoals(true);
+      stopRobot();
+    }
+    return;
+  }
+  cancellation_reason_ = reason;
   task_.state = NavigationState::CANCELING;
-  ++task_generation_;
   cancelSubGoals(true);
   stopRobot();
+  finishCancellation();
+}
+
+void RegulatedNavigator::finishCancellation()
+{
+  const auto generation = task_.generation;
+  ++task_generation_;
   auto pose_result = std::make_shared<NavigateToPose::Result>();
-  auto poses_result = std::make_shared<NavigateThroughPoses::Result>();
   if (active_pose_goal_)
   {
     if (active_pose_goal_->is_canceling())
@@ -77,18 +82,6 @@ void RegulatedNavigator::cancelTask(const std::string & reason)
       active_pose_goal_->abort(pose_result);
     }
     active_pose_goal_.reset();
-  }
-  if (active_poses_goal_)
-  {
-    if (active_poses_goal_->is_canceling())
-    {
-      active_poses_goal_->canceled(poses_result);
-    }
-    else
-    {
-      active_poses_goal_->abort(poses_result);
-    }
-    active_poses_goal_.reset();
   }
   if (active_navigation_service_goal_)
   {
@@ -104,43 +97,7 @@ void RegulatedNavigator::cancelTask(const std::string & reason)
     }
     active_navigation_service_goal_.reset();
   }
-  LOG_WARN("导航任务已取消并完成收口，generation={}，reason={}", generation, reason);
-  resetTask();
-}
-
-// 新任务接管前使旧规划／跟踪轮次失效，发出取消与停车请求并 abort 旧上层任务。
-// 该流程不等待机械停稳，不应在注释中描述为已经完成安全控制权握手。
-void RegulatedNavigator::preemptCurrentTask()
-{
-  if (task_.type == TaskType::NONE)
-  {
-    return;
-  }
-  const auto generation = task_.generation;
-  const char * task_type = task_.type == TaskType::TO_POSE ? "to_pose" : task_.type == TaskType::THROUGH_POSES ? "through_poses" : task_.type == TaskType::TOPIC_GOAL ? "topic_goal" : "navigation_service";
-  ++task_generation_;
-  cancelSubGoals(true);
-  stopRobot();
-  auto pose_result = std::make_shared<NavigateToPose::Result>();
-  auto poses_result = std::make_shared<NavigateThroughPoses::Result>();
-  if (active_pose_goal_)
-  {
-    active_pose_goal_->abort(pose_result);
-    active_pose_goal_.reset();
-  }
-  if (active_poses_goal_)
-  {
-    active_poses_goal_->abort(poses_result);
-    active_poses_goal_.reset();
-  }
-  if (active_navigation_service_goal_)
-  {
-    auto navigation_service_result = std::make_shared<NavigationService::Result>();
-    navigation_service_result->finish = false;
-    active_navigation_service_goal_->abort(navigation_service_result);
-    active_navigation_service_goal_.reset();
-  }
-  LOG_INFO("旧导航任务被新任务抢占，generation={}，task_type={}", generation, task_type);
+  LOG_WARN("导航任务已取消并完成收口，generation={}，reason={}", generation, cancellation_reason_);
   resetTask();
 }
 
@@ -149,6 +106,12 @@ void RegulatedNavigator::preemptCurrentTask()
 void RegulatedNavigator::succeedTask()
 {
   const auto generation = task_.generation;
+  if (((active_pose_goal_ && active_pose_goal_->is_canceling()) ||
+    (active_navigation_service_goal_ && active_navigation_service_goal_->is_canceling())))
+  {
+    cancelTask("收到外层导航取消请求");
+    return;
+  }
   const auto elapsed = (now() - task_.start_time).seconds();
   task_.distance_remaining = 0.0;
   task_.progress = 1.0F;
@@ -157,11 +120,6 @@ void RegulatedNavigator::succeedTask()
   {
     active_pose_goal_->succeed(std::make_shared<NavigateToPose::Result>());
     active_pose_goal_.reset();
-  }
-  if (active_poses_goal_)
-  {
-    active_poses_goal_->succeed(std::make_shared<NavigateThroughPoses::Result>());
-    active_poses_goal_.reset();
   }
   if (active_navigation_service_goal_)
   {
@@ -175,14 +133,7 @@ void RegulatedNavigator::succeedTask()
     active_navigation_service_goal_->succeed(navigation_service_result);
     active_navigation_service_goal_.reset();
   }
-  if (operation_mode_ == NavigationMode::AUTONOMOUS)
-  {
-    LOG_INFO("导航任务执行成功，generation={}，耗时={:.3f}s，恢复次数={}，控制恢复={}，定位恢复={}", generation, elapsed, detail::autonomousFeedbackRecoveries(task_.recovery_count, task_.localization_recovery_count), task_.recovery_count, task_.localization_recovery_count);
-  }
-  else
-  {
     LOG_INFO("导航任务执行成功，generation={}，耗时={:.3f}s，恢复次数={}", generation, elapsed, task_.recovery_count);
-  }
   resetTask();
 }
 
@@ -190,10 +141,13 @@ void RegulatedNavigator::succeedTask()
 // 此函数自身没有调用 stopRobot；停车效果不能从函数名或本地状态归零推断。
 void RegulatedNavigator::failTask(const std::string & reason)
 {
-  if (operation_mode_ == NavigationMode::AUTONOMOUS_FIXED)
+  if (((active_pose_goal_ && active_pose_goal_->is_canceling()) ||
+    (active_navigation_service_goal_ && active_navigation_service_goal_->is_canceling())))
   {
-    stopRobot();
+    cancelTask(reason);
+    return;
   }
+    stopRobot();
   const auto generation = task_.generation;
   task_.state = NavigationState::FAILED;
   cancelSubGoals(true);
@@ -201,11 +155,6 @@ void RegulatedNavigator::failTask(const std::string & reason)
   {
     active_pose_goal_->abort(std::make_shared<NavigateToPose::Result>());
     active_pose_goal_.reset();
-  }
-  if (active_poses_goal_)
-  {
-    active_poses_goal_->abort(std::make_shared<NavigateThroughPoses::Result>());
-    active_poses_goal_.reset();
   }
   if (active_navigation_service_goal_)
   {
@@ -227,7 +176,7 @@ void RegulatedNavigator::resetTask()
   frozen_plan_requested_ = false;
   frozen_follow_inflight_ = false;
   frozen_localization_wait_ = false;
-  if (operation_mode_ == NavigationMode::AUTONOMOUS_FIXED)
+  if (task_.type == TaskType::TO_POSE)
   {
     frozen_soft_pause_since_.reset();
     frozen_localization_reason_.clear();
@@ -238,16 +187,18 @@ void RegulatedNavigator::resetTask()
   frozen_phase_.clear();
   collision_progress_paused_ = false;
   // 固定路径结束清除该任务的限速基准；这条消息不代替 stopRobot 的 Twist 零命令。
-  if (task_.type == TaskType::NAVIGATION_SERVICE && speed_limit_pub_)
+    stopping_since_ = std::chrono::steady_clock::now();
+  const auto speed_pub = speedPublisher();
+  if ((task_.type == TaskType::NAVIGATION_SERVICE ||
+    (task_.type == TaskType::TO_POSE)) && speed_pub)
   {
     nav2_msgs::msg::SpeedLimit speed_limit;
     speed_limit.percentage = false;
     speed_limit.speed_limit = 0.0;
-    speed_limit_pub_->publish(speed_limit);
+    speed_pub->publish(speed_limit);
   }
   task_ = NavigationTask();
   task_.generation = task_generation_;
-  updating_path_ = false;
   planning_active_ = false;
   has_last_pose_ = false;
   current_speed_ = 0.0;

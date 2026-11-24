@@ -14,6 +14,7 @@ install(PROGRAMS
   scripts/audit_warehouse_map.py
   scripts/export_slam_map.py
   scripts/chassis_control_to_twist.py
+  scripts/control_res_to_twist.py
   scripts/cpu_lidar.py
   scripts/odom_to_motion_state.py
   scripts/initial_pose_pub.py

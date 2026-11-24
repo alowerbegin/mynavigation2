@@ -142,11 +142,6 @@ std::optional<nav_msgs::msg::Path> RegulatedNavigator::prepareFixedPath(const st
 // 几何连续性检查在接受后的 prepareFixedPath，故部分几何错误会以已接受后 ABORTED 结束。
 rclcpp_action::GoalResponse RegulatedNavigator::handleNavigationServiceGoal(const rclcpp_action::GoalUUID &, const std::shared_ptr<const NavigationService::Goal> goal)
 {
-  if (operation_mode_ != NavigationMode::FIXED_PATH)
-  {
-    LOG_WARN("当前模式不接受 NavigationService Action Goal");
-    return rclcpp_action::GoalResponse::REJECT;
-  }
   if (!active_ || goal->navi_segment.empty())
   {
     LOG_WARN("拒绝 NavigationService Goal：节点未激活或分段数组为空");
@@ -155,6 +150,10 @@ rclcpp_action::GoalResponse RegulatedNavigator::handleNavigationServiceGoal(cons
   if (!chassis_control_subscriber_ || !chassis_control_subscriber_->canStartNavigation())
   {
     LOG_WARN("拒绝 NavigationService Goal：遥控占用、交接未完成、出口冲突或无新鲜停稳反馈");
+    return rclcpp_action::GoalResponse::REJECT;
+  }
+  if (!admitUnified(false))
+  {
     return rclcpp_action::GoalResponse::REJECT;
   }
   const uint8_t requested_direction = goal->navi_segment.front().motion_direction;
@@ -184,6 +183,10 @@ rclcpp_action::GoalResponse RegulatedNavigator::handleNavigationServiceGoal(cons
 // 返回 ACCEPT 不表示下游取消完成，finish=false 也不能替代轮速停稳证据。
 rclcpp_action::CancelResponse RegulatedNavigator::handleNavigationServiceCancel(const std::shared_ptr<NavigationServiceHandle> goal)
 {
+  if (goal == pending_fixed_)
+  {
+    return rclcpp_action::CancelResponse::ACCEPT;
+  }
   if (goal == active_navigation_service_goal_)
   {
     cancel_requested_ = true;
@@ -224,25 +227,38 @@ void RegulatedNavigator::handleNavigationServiceAccepted(const std::shared_ptr<N
     return;
   }
 
+    if (!admitUnified(false))
+    {
+      goal->abort(std::make_shared<NavigationService::Result>());
+      return;
+    }
+    pending_fixed_ = goal;
+    pending_path_ = std::move(*prepared_path);
+    pending_since_ = std::chrono::steady_clock::now();
+    cancelTask("被新的固定路径 Action 抢占");
+}
+
+void RegulatedNavigator::startFixedPath(
+  const std::shared_ptr<NavigationServiceHandle> & goal, nav_msgs::msg::Path path)
+{
   const auto & first_segment = goal->get_goal()->navi_segment.front();
-  const double start_yaw = tf2::getYaw(prepared_path->poses.front().pose.orientation);
-  const double goal_yaw = tf2::getYaw(prepared_path->poses.back().pose.orientation);
-  const auto & start_position = prepared_path->poses.front().pose.position;
-  const auto & goal_position = prepared_path->poses.back().pose.position;
+  const double start_yaw = tf2::getYaw(path.poses.front().pose.orientation);
+  const double goal_yaw = tf2::getYaw(path.poses.back().pose.orientation);
+  const auto & start_position = path.poses.front().pose.position;
+  const auto & goal_position = path.poses.back().pose.position;
   LOG_INFO("固定路径全部路径点车头航向已按路径切线和运动方向计算，start=({:.3f},{:.3f},yaw={:.6f})，goal=({:.3f},{:.3f},yaw={:.6f})，motion_direction={}", start_position.x, start_position.y, start_yaw, goal_position.x, goal_position.y, goal_yaw, first_segment.motion_direction);
 
-  preemptCurrentTask();
   active_navigation_service_goal_ = goal;
   task_ = NavigationTask();
   task_.generation = ++task_generation_;
   task_.type = TaskType::NAVIGATION_SERVICE;
   task_.task_id = goal->get_goal()->task_id;
-  task_.goal = prepared_path->poses.back();
-  task_.active_path = *prepared_path;
-  for (std::size_t index = 1; index < prepared_path->poses.size(); ++index)
+  task_.goal = path.poses.back();
+  task_.active_path = path;
+  for (std::size_t index = 1; index < path.poses.size(); ++index)
   {
-    const auto & previous = prepared_path->poses[index - 1].pose.position;
-    const auto & current = prepared_path->poses[index].pose.position;
+    const auto & previous = path.poses[index - 1].pose.position;
+    const auto & current = path.poses[index].pose.position;
     task_.total_path_length += std::hypot(current.x - previous.x, current.y - previous.y);
   }
   task_.distance_remaining = task_.total_path_length;
@@ -260,11 +276,11 @@ void RegulatedNavigator::handleNavigationServiceAccepted(const std::shared_ptr<N
   task_.requested_speed = std::min(requested_speed, fixed_path_max_speed_);
   const bool is_backward = first_segment.motion_direction == byd_custom_msgs::msg::NaviSegment::MOTION_DIRECTION_BACKWARD;
   has_last_pose_ = false;
-  LOG_INFO("接受 NavigationService Action，generation={}，task_id={}，frame={}，路径点数={}，总长度={:.3f}m，请求速度={:.3f}m/s，生效速度={:.3f}m/s，全局上限={:.3f}m/s", task_.generation, task_.task_id, prepared_path->header.frame_id, prepared_path->poses.size(), task_.total_path_length, requested_speed, task_.requested_speed, fixed_path_max_speed_);
+  LOG_INFO("接受 NavigationService Action，generation={}，task_id={}，frame={}，路径点数={}，总长度={:.3f}m，请求速度={:.3f}m/s，生效速度={:.3f}m/s，全局上限={:.3f}m/s", task_.generation, task_.task_id, path.header.frame_id, path.poses.size(), task_.total_path_length, requested_speed, task_.requested_speed, fixed_path_max_speed_);
   publishFixedPath(task_.active_path);
   publishSpeedLimit();
   LOG_INFO("固定路径{}保持车辆当前位置不变，由专用控制器根据起点横向与运动方向航向误差选择直接跟踪或原地对齐，再以{}速度跟踪并在终点对齐停车，generation={}", is_backward ? "后退" : "前进", is_backward ? "负" : "正", task_.generation);
-  sendFollowPath(*prepared_path);
+  sendFollowPath(path);
 }
 
 // 发布 Path 及左右边界、端点等 Marker，帮助观察固定路径几何。
@@ -363,7 +379,7 @@ void RegulatedNavigator::publishFixedPath(const nav_msgs::msg::Path & path)
 // 是否还属于当前有效任务由 task_ 与上层状态机决定；不从已结束任务恢复。
 void RegulatedNavigator::resumeCurrentTask()
 {
-  if (operation_mode_ == NavigationMode::AUTONOMOUS_FIXED)
+  if (task_.type == TaskType::TO_POSE)
   {
     followFrozenSegment(true);
     return;
@@ -380,8 +396,6 @@ void RegulatedNavigator::resumeCurrentTask()
     sendFollowPath(task_.active_path);
     return;
   }
-  LOG_INFO("恢复自主导航任务，generation={}，重新进入规划链", task_.generation);
-  startPlanning(false);
 }
 
 // 将两端点扩成共线的四控制点，两个内点分别位于线段的三分之一和三分之二。

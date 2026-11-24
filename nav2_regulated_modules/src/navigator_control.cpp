@@ -18,39 +18,13 @@ void RegulatedNavigator::sendFollowPath(const nav_msgs::msg::Path & path)
     handlePlanningFailure("控制路径为空");
     return;
   }
-  if (operation_mode_ == NavigationMode::AUTONOMOUS)
-  {
-    geometry_msgs::msg::PoseStamped current_pose;
-    if (!lookupCurrentPose(current_pose))
-    {
-      cancelSubGoals(true);
-      stopRobot();
-      task_.state = NavigationState::LOCALIZATION_LOST;
-      localization_lost_time_ = now();
-      localization_stable_since_ = rclcpp::Time(0, 0, get_clock()->get_clock_type());
-      LOG_WARN("自主路径执行前定位未就绪，保持停车并等待新鲜 TF");
-      return;
-    }
-  }
   task_.active_path = path;
-  if (operation_mode_ == NavigationMode::AUTONOMOUS)
-  {
-    task_.distance_remaining = 0.0;
-    current_speed_ = 0.0;
-  }
   task_.state = NavigationState::CONTROLLING;
   const auto generation = task_.generation;
   const auto sequence = ++follow_sequence_;
   const bool replacing_path = active_follow_goal_ != nullptr;
-  if (operation_mode_ == NavigationMode::AUTONOMOUS && !replacing_path)
-  {
-    // 新任务或真正恢复后的首次执行重建基准；周期换路径继续累计卡死时间。
-    task_.last_progress_pose = geometry_msgs::msg::PoseStamped();
-    task_.last_progress_time = now();
-    autonomous_progress_heading_error_.reset();
-  }
-  const std::string controller_id = operation_mode_ == NavigationMode::AUTONOMOUS_FIXED ? "AutonomousFixedPathController" : task_.type == TaskType::NAVIGATION_SERVICE ? fixed_path_controller_id_ : control_module_.controllerId();
-  const std::string goal_checker_id = operation_mode_ == NavigationMode::AUTONOMOUS_FIXED ? (frozen_segment_ + 1 == frozen_segments_.size() ? "autonomous_fixed_goal_checker" : "autonomous_fixed_cusp_checker") : task_.type == TaskType::NAVIGATION_SERVICE ? fixed_path_goal_checker_id_ : control_module_.goalCheckerId();
+  const std::string controller_id = task_.type == TaskType::TO_POSE ? "AutonomousFixedPathController" : fixed_path_controller_id_;
+  const std::string goal_checker_id = task_.type == TaskType::TO_POSE ? (frozen_segment_ + 1 == frozen_segments_.size() ? "autonomous_fixed_goal_checker" : "autonomous_fixed_cusp_checker") : fixed_path_goal_checker_id_;
   FollowPath::Goal goal;
   goal.path = path;
   goal.controller_id = controller_id;
@@ -64,36 +38,26 @@ void RegulatedNavigator::sendFollowPath(const nav_msgs::msg::Path & path)
     LOG_INFO("下发 FollowPath，generation={}，follow_sequence={}，路径点数={}，controller_id={}，goal_checker_id={}", generation, sequence, path.poses.size(), controller_id, goal_checker_id);
   }
   auto options = rclcpp_action::Client<FollowPath>::SendGoalOptions();
-  // 发送请求时还没有可靠的已接受句柄；响应到达后先校验代次，才能保存为当前跟踪目标。
-  options.goal_response_callback = [this, generation, sequence](auto handle)
+  const auto client = followClient();
+  const std::weak_ptr<rclcpp_action::Client<FollowPath>> weak_client = client;
+  auto * outstanding = task_.type == TaskType::NAVIGATION_SERVICE ? &fixed_path_outstanding_follows_ :
+    task_.type == TaskType::TO_POSE ? &frozen_outstanding_follows_ : nullptr;
+  options.goal_response_callback = [this, generation, sequence, weak_client, outstanding](auto handle)
   {
-    if (operation_mode_ == NavigationMode::FIXED_PATH)
+    if (outstanding)
     {
-      if (!handle && fixed_path_outstanding_follows_ > 0)
+      if (!handle)
       {
-        --fixed_path_outstanding_follows_;
-      }
-      // 接管时尚未返回句柄的请求也必须取消，不能让迟到 Goal 继续控制底盘。
-      if (!isCurrentFollow(generation, sequence))
-      {
-        if (handle)
-        {
-          follow_client_->async_cancel_goal(handle);
-        }
-        return;
-      }
-    }
-    if (operation_mode_ == NavigationMode::AUTONOMOUS_FIXED)
-    {
-      if (!handle && frozen_outstanding_follows_ > 0)
-      {
-        --frozen_outstanding_follows_;
+        --*outstanding;
       }
       if (!isCurrentFollow(generation, sequence))
       {
         if (handle)
         {
-          follow_client_->async_cancel_goal(handle);
+          if (const auto sender = weak_client.lock())
+          {
+            sender->async_cancel_goal(handle);
+          }
         }
         return;
       }
@@ -106,12 +70,13 @@ void RegulatedNavigator::sendFollowPath(const nav_msgs::msg::Path & path)
         startRecovery("控制 Goal 被拒绝");
         return;
       }
-      if ((task_.type == TaskType::NAVIGATION_SERVICE || operation_mode_ == NavigationMode::AUTONOMOUS_FIXED) && speed_limit_pub_)
+      const auto speed_pub = speedPublisher();
+      if ((task_.type == TaskType::NAVIGATION_SERVICE || task_.type == TaskType::TO_POSE) && speed_pub)
       {
         nav2_msgs::msg::SpeedLimit speed_limit;
         speed_limit.percentage = false;
         speed_limit.speed_limit = task_.requested_speed;
-        speed_limit_pub_->publish(speed_limit);
+        speed_pub->publish(speed_limit);
       }
     }
   };
@@ -119,7 +84,7 @@ void RegulatedNavigator::sendFollowPath(const nav_msgs::msg::Path & path)
   {
     if (isCurrentFollow(generation, sequence))
     {
-      if (operation_mode_ != NavigationMode::AUTONOMOUS_FIXED)
+      if (task_.type != TaskType::TO_POSE)
       {
         task_.distance_remaining = static_cast<double>(controller_feedback->distance_to_goal);
       }
@@ -140,15 +105,11 @@ void RegulatedNavigator::sendFollowPath(const nav_msgs::msg::Path & path)
     }
   };
   // 下游结果只影响匹配当前 generation／sequence 的任务；迟到结果不能结束新任务。
-  options.result_callback = [this, generation, sequence](const auto & result)
+  options.result_callback = [this, generation, sequence, outstanding](const auto & result)
   {
-    if (operation_mode_ == NavigationMode::FIXED_PATH && fixed_path_outstanding_follows_ > 0)
+    if (outstanding)
     {
-      --fixed_path_outstanding_follows_;
-    }
-    if (operation_mode_ == NavigationMode::AUTONOMOUS_FIXED && frozen_outstanding_follows_ > 0)
-    {
-      --frozen_outstanding_follows_;
+      --*outstanding;
     }
     if (!isCurrentFollow(generation, sequence))
     {
@@ -157,7 +118,7 @@ void RegulatedNavigator::sendFollowPath(const nav_msgs::msg::Path & path)
     active_follow_goal_.reset();
     if (result.code == rclcpp_action::ResultCode::SUCCEEDED)
     {
-      if (operation_mode_ == NavigationMode::AUTONOMOUS_FIXED)
+      if (task_.type == TaskType::TO_POSE)
       {
         finishFrozenSegment();
       }
@@ -171,25 +132,21 @@ void RegulatedNavigator::sendFollowPath(const nav_msgs::msg::Path & path)
       startRecovery("控制器执行路径失败");
     }
   };
-  if (operation_mode_ == NavigationMode::AUTONOMOUS_FIXED)
+  if (outstanding)
   {
-    ++frozen_outstanding_follows_;
-  }
-  if (operation_mode_ == NavigationMode::FIXED_PATH)
-  {
-    ++fixed_path_outstanding_follows_;
+    ++*outstanding;
   }
   try
   {
-    follow_client_->async_send_goal(goal, options);
+    client->async_send_goal(goal, options);
   }
-  catch (...)
+  catch (const std::exception & error)
   {
-    if (operation_mode_ == NavigationMode::FIXED_PATH)
+    if (outstanding)
     {
-      --fixed_path_outstanding_follows_;
+      --*outstanding;
     }
-    throw;
+    failTask(error.what());
   }
 }
 
@@ -204,14 +161,16 @@ bool RegulatedNavigator::isCurrentFollow(const uint64_t generation, const uint64
 // 不检查发布确认或实际轮速；若没有发布器直接返回，不承诺已经机械停稳。
 void RegulatedNavigator::stopRobot()
 {
-  if (!stop_cmd_pub_)
+  const auto stop_pub = task_.type == TaskType::TO_POSE ?
+    lattice_stop_pub_ : stop_cmd_pub_;
+  if (!stop_pub)
   {
     return;
   }
   geometry_msgs::msg::Twist stop;
-  stop_cmd_pub_->publish(stop);
-  stop_cmd_pub_->publish(stop);
-  stop_cmd_pub_->publish(stop);
+  stop_pub->publish(stop);
+  stop_pub->publish(stop);
+  stop_pub->publish(stop);
   LOG_DEBUG("已向速度链入口连续发布 3 帧零速度");
 }
 

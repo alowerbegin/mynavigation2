@@ -20,7 +20,8 @@ RegulatedNavigator::RegulatedNavigator(const rclcpp::NodeOptions & options) : na
 {
   declare_parameter("global_frame", "map");
   declare_parameter("robot_base_frame", "base_link");
-  declare_parameter("operation_mode", "autonomous");
+  declare_parameter("fixed_execution_nodes", std::vector<std::string>{});
+  declare_parameter("lattice_execution_nodes", std::vector<std::string>{});
   declare_parameter("tf_diagnostics_enabled", true);
   declare_parameter("tf_diagnostics_log_frequency", 1.0);
   declare_parameter("tf_diagnostics_map_base_frequency", 100.0);
@@ -28,16 +29,12 @@ RegulatedNavigator::RegulatedNavigator(const rclcpp::NodeOptions & options) : na
   declare_parameter("collision_state_enabled", false);
   declare_parameter("collision_state_topic", "/collision_state");
   declare_parameter("collision_state_timeout", 0.5);
-  declare_parameter("goal_topic", "goal_pose");
   declare_parameter("navigation_service_action", "navigation_service");
   declare_parameter("fixed_path_visualization_topic", "fixed_path_plan");
   declare_parameter("fixed_path_boundaries_topic", "fixed_path_boundaries");
   declare_parameter("fixed_path_boundary_half_width", 0.4);
   declare_parameter("navigate_to_pose_action", "navigate_to_pose");
-  declare_parameter("navigate_through_poses_action", "navigate_through_poses");
   declare_parameter("compute_path_to_pose_action", "compute_path_to_pose");
-  declare_parameter("compute_path_through_poses_action", "compute_path_through_poses");
-  declare_parameter("smooth_path_action", "smooth_path");
   declare_parameter("follow_path_action", "follow_path");
   declare_parameter("planner_id", "GridBasedAstar");
   declare_parameter("controller_id", "RPP");
@@ -53,7 +50,7 @@ RegulatedNavigator::RegulatedNavigator(const rclcpp::NodeOptions & options) : na
   declare_parameter("feedback_frequency", 5.0);
   declare_parameter("replan_frequency", 1.0);
   declare_parameter("autonomous_fixed_max_speed", 0.5);
-  declare_parameter("autonomous_fixed_xy_tolerance", get_parameter("operation_mode").as_string() == "autonomous_fixed" ? 0.01 : 0.03);
+  declare_parameter("autonomous_fixed_xy_tolerance", 0.01);
   declare_parameter("autonomous_fixed_yaw_tolerance", 0.15726646259971647);
   // 中间段（换向点）位置复核容差：默认 1 cm 与原行为一致；状态格模式需放宽以吸收旋转滑移。
   declare_parameter("autonomous_fixed_cusp_xy_tolerance", 0.01);
@@ -63,7 +60,6 @@ RegulatedNavigator::RegulatedNavigator(const rclcpp::NodeOptions & options) : na
   declare_parameter("autonomous_fixed_rotation_position_tolerance", 0.0);
   declare_parameter("autonomous_fixed_obstacle_timeout", 60.0);
   declare_parameter("autonomous_fixed_resume_distance", 0.20);
-  if (get_parameter("operation_mode").as_string() == "autonomous_fixed")
   {
     declare_parameter("autonomous_fixed_short_pause_timeout", 0.5);
     declare_parameter("autonomous_fixed_resume_stable_duration", 0.15);
@@ -80,14 +76,6 @@ RegulatedNavigator::RegulatedNavigator(const rclcpp::NodeOptions & options) : na
   declare_parameter("max_localization_rotation_jump", 0.35);
   declare_parameter("progress_timeout", 10.0);
   declare_parameter("progress_min_translation", 0.1);
-  if (get_parameter("operation_mode").as_string() == "autonomous")
-  {
-    declare_parameter("autonomous_progress_min_rotation", 0.2);
-    declare_parameter("autonomous_goal_progress_distance", 0.01);
-    declare_parameter("autonomous_terminal_progress_enabled", false);
-    declare_parameter("autonomous_terminal_xy_tolerance", 0.03);
-    declare_parameter("autonomous_terminal_distance", 0.15);
-  }
   declare_parameter("localization_recovery_timeout", 10.0);
   declare_parameter("localization_stable_duration", 0.5);
   declare_parameter("fixed_path_step", 0.1);
@@ -127,36 +115,13 @@ nav2_util::CallbackReturn RegulatedNavigator::on_configure(const rclcpp_lifecycl
 {
   global_frame_ = get_parameter("global_frame").as_string();
   robot_base_frame_ = get_parameter("robot_base_frame").as_string();
-  const auto operation_mode = get_parameter("operation_mode").as_string();
-  if (operation_mode == "remote")
-  {
-    operation_mode_ = NavigationMode::REMOTE;
-  }
-  else if (operation_mode == "autonomous")
-  {
-    operation_mode_ = NavigationMode::AUTONOMOUS;
-  }
-  else if (operation_mode == "fixed_path")
-  {
-    operation_mode_ = NavigationMode::FIXED_PATH;
-  }
-  else if (operation_mode == "autonomous_fixed")
-  {
-    operation_mode_ = NavigationMode::AUTONOMOUS_FIXED;
-  }
-  else
-  {
-    LOG_ERROR("不支持的 operation_mode：{}", operation_mode);
-    return nav2_util::CallbackReturn::FAILURE;
-  }
-  goal_topic_ = get_parameter("goal_topic").as_string();
   navigation_service_action_ = get_parameter("navigation_service_action").as_string();
   fixed_path_visualization_topic_ = get_parameter("fixed_path_visualization_topic").as_string();
   fixed_path_boundaries_topic_ = get_parameter("fixed_path_boundaries_topic").as_string();
   fixed_path_controller_id_ = get_parameter("fixed_path_controller_id").as_string();
   fixed_path_goal_checker_id_ = get_parameter("fixed_path_goal_checker_id").as_string();
   // 先按启动模式约束功能，即便参数设 true，非 fixed_path 也不会打开本导航器的状态门控。
-  collision_state_enabled_ = (operation_mode_ == NavigationMode::FIXED_PATH || operation_mode_ == NavigationMode::AUTONOMOUS_FIXED) && get_parameter("collision_state_enabled").as_bool();
+  collision_state_enabled_ = get_parameter("collision_state_enabled").as_bool();
   const auto collision_topic = get_parameter("collision_state_topic").as_string();
   collision_state_.configure(get_parameter("collision_state_timeout").as_double());
   if (collision_state_enabled_ && collision_topic.empty())
@@ -198,24 +163,6 @@ nav2_util::CallbackReturn RegulatedNavigator::on_configure(const rclcpp_lifecycl
   max_translation_jump_ = get_parameter("max_localization_translation_jump").as_double();
   max_rotation_jump_ = get_parameter("max_localization_rotation_jump").as_double();
   progress_min_translation_ = get_parameter("progress_min_translation").as_double();
-  if (operation_mode_ == NavigationMode::AUTONOMOUS)
-  {
-    autonomous_progress_min_rotation_ = get_parameter("autonomous_progress_min_rotation").as_double();
-    autonomous_goal_progress_distance_ = get_parameter("autonomous_goal_progress_distance").as_double();
-    autonomous_terminal_progress_enabled_ = get_parameter("autonomous_terminal_progress_enabled").as_bool();
-    autonomous_terminal_xy_tolerance_ = get_parameter("autonomous_terminal_xy_tolerance").as_double();
-    autonomous_terminal_distance_ = get_parameter("autonomous_terminal_distance").as_double();
-    if (!std::isfinite(autonomous_progress_min_rotation_) || autonomous_progress_min_rotation_ <= 0.0 || !std::isfinite(autonomous_goal_progress_distance_) || autonomous_goal_progress_distance_ <= 0.0)
-    {
-      LOG_ERROR("自主模式的旋转和末端进度阈值必须为有限正数");
-      return nav2_util::CallbackReturn::FAILURE;
-    }
-    if (!std::isfinite(autonomous_terminal_xy_tolerance_) || autonomous_terminal_xy_tolerance_ <= 0.0 || !std::isfinite(autonomous_terminal_distance_) || autonomous_terminal_distance_ <= autonomous_terminal_xy_tolerance_)
-    {
-      LOG_ERROR("自主末端进度的容差与进入距离配置无效");
-      return nav2_util::CallbackReturn::FAILURE;
-    }
-  }
   localization_recovery_timeout_ = get_parameter("localization_recovery_timeout").as_double();
   localization_stable_duration_ = get_parameter("localization_stable_duration").as_double();
   fixed_path_step_ = get_parameter("fixed_path_step").as_double();
@@ -261,20 +208,34 @@ nav2_util::CallbackReturn RegulatedNavigator::on_configure(const rclcpp_lifecycl
   control_module_.configure(get_parameter("controller_id").as_string(), get_parameter("goal_checker_id").as_string(), get_parameter("progress_timeout").as_double());
   motion_state_subscriber_ = std::make_unique<MotionStateSubscriber>(*this);
   ChassisControlConfig chassis_control_config;
-  chassis_control_config.unified_output = operation_mode_ == NavigationMode::FIXED_PATH;
+  chassis_control_config.unified_output = true;
   chassis_control_config.navigation_topic = get_parameter("chassis_navigation_topic").as_string();
   chassis_control_config.request_takeover = [this]()
   {
+    finishPending(false);
     cancelTask("后台遥控／统一出口保护接管，旧路径不自动恢复");
   };
   chassis_control_config.navigation_active = [this]()
   {
-    return active_ && task_.type == TaskType::NAVIGATION_SERVICE;
+    return active_ && (task_.type != TaskType::NONE &&
+      task_.state != NavigationState::CANCELING);
   };
   chassis_control_config.navigation_drained = [this]()
   {
-    return fixed_path_outstanding_follows_ == 0;
+    return unifiedDrained();
   };
+  {
+    chassis_control_config.lattice_navigation_topic = get_parameter("smoothed_cmd_vel_topic").as_string();
+    chassis_control_config.navigation_source = [this]()
+    {
+      if (task_.state != NavigationState::CONTROLLING || !active_follow_goal_)
+      {
+        return -1;
+      }
+      return task_.type == TaskType::TO_POSE ? 1 : 0;
+    };
+    chassis_control_config.navigation_generation = [this]() {return follow_sequence_;};
+  }
   chassis_control_config.input_topic = get_parameter("chassis_input_topic").as_string();
   chassis_control_config.output_topic = get_parameter("chassis_output_topic").as_string();
   chassis_control_config.motion_state_timeout = get_parameter("chassis_motion_state_timeout").as_double();
@@ -306,24 +267,17 @@ nav2_util::CallbackReturn RegulatedNavigator::on_configure(const rclcpp_lifecycl
   }
 
   compute_pose_client_ = rclcpp_action::create_client<ComputePathToPose>(this, get_parameter("compute_path_to_pose_action").as_string());
-  compute_poses_client_ = rclcpp_action::create_client<ComputePathThroughPoses>(this, get_parameter("compute_path_through_poses_action").as_string());
-  smooth_client_ = rclcpp_action::create_client<SmoothPath>(this, get_parameter("smooth_path_action").as_string());
   follow_client_ = rclcpp_action::create_client<FollowPath>(this, get_parameter("follow_path_action").as_string());
   clear_local_client_ = create_client<ClearCostmap>("local_costmap/clear_entirely_local_costmap");
   clear_global_client_ = create_client<ClearCostmap>("global_costmap/clear_entirely_global_costmap");
 
   navigate_pose_server_ = rclcpp_action::create_server<NavigateToPose>(this, get_parameter("navigate_to_pose_action").as_string(), std::bind(&RegulatedNavigator::handlePoseGoal, this, std::placeholders::_1, std::placeholders::_2), std::bind(&RegulatedNavigator::handlePoseCancel, this, std::placeholders::_1), std::bind(&RegulatedNavigator::handlePoseAccepted, this, std::placeholders::_1));
-  navigate_poses_server_ = rclcpp_action::create_server<NavigateThroughPoses>(this, get_parameter("navigate_through_poses_action").as_string(), std::bind(&RegulatedNavigator::handlePosesGoal, this, std::placeholders::_1, std::placeholders::_2), std::bind(&RegulatedNavigator::handlePosesCancel, this, std::placeholders::_1), std::bind(&RegulatedNavigator::handlePosesAccepted, this, std::placeholders::_1));
-
-  goal_sub_ = create_subscription<geometry_msgs::msg::PoseStamped>(goal_topic_, rclcpp::SystemDefaultsQoS(), std::bind(&RegulatedNavigator::onTopicGoal, this, std::placeholders::_1));
-  if (operation_mode_ == NavigationMode::FIXED_PATH)
   {
     navigation_service_server_ = rclcpp_action::create_server<NavigationService>(this, navigation_service_action_, std::bind(&RegulatedNavigator::handleNavigationServiceGoal, this, std::placeholders::_1, std::placeholders::_2), std::bind(&RegulatedNavigator::handleNavigationServiceCancel, this, std::placeholders::_1), std::bind(&RegulatedNavigator::handleNavigationServiceAccepted, this, std::placeholders::_1));
     fixed_path_pub_ = create_publisher<nav_msgs::msg::Path>(fixed_path_visualization_topic_, rclcpp::QoS(rclcpp::KeepLast(1)).reliable().transient_local());
     fixed_path_boundaries_pub_ = create_publisher<visualization_msgs::msg::MarkerArray>(fixed_path_boundaries_topic_, rclcpp::QoS(rclcpp::KeepLast(1)).reliable().transient_local());
   }
   stop_cmd_pub_ = create_publisher<geometry_msgs::msg::Twist>(get_parameter("stop_cmd_vel_topic").as_string(), rclcpp::SystemDefaultsQoS());
-  if (operation_mode_ == NavigationMode::AUTONOMOUS_FIXED)
   {
     const std::vector<std::string> fixed_parameters =
     {
@@ -345,11 +299,10 @@ nav2_util::CallbackReturn RegulatedNavigator::on_configure(const rclcpp_lifecycl
     {
       throw std::invalid_argument("Autonomous fixed resume stability must fit inside the short pause window");
     }
-    frozen_status_sub_ = create_subscription<std_msgs::msg::String>("autonomous_fixed/execution_status", rclcpp::QoS(10), std::bind(&RegulatedNavigator::onFixedExecutionStatus, this, std::placeholders::_1));
+    frozen_status_sub_ = create_subscription<std_msgs::msg::String>("lattice_exec/autonomous_fixed/execution_status", rclcpp::QoS(10), std::bind(&RegulatedNavigator::onFixedExecutionStatus, this, std::placeholders::_1));
     frozen_path_pub_ = create_publisher<nav_msgs::msg::Path>("autonomous_fixed/plan", rclcpp::QoS(1).reliable().transient_local());
   }
   const auto velocity_qos = rclcpp::QoS(rclcpp::KeepLast(10)).best_effort();
-  if (get_parameter("legacy_velocity_logging").as_bool() || operation_mode_ == NavigationMode::AUTONOMOUS_FIXED)
   {
     controller_velocity_sub_ = create_subscription<geometry_msgs::msg::Twist>(controller_cmd_vel_topic_, velocity_qos, std::bind(&RegulatedNavigator::onControllerVelocity, this, std::placeholders::_1));
     smoothed_velocity_sub_ = create_subscription<geometry_msgs::msg::Twist>(smoothed_cmd_vel_topic_, velocity_qos, std::bind(&RegulatedNavigator::onSmoothedVelocity, this, std::placeholders::_1));
@@ -365,12 +318,32 @@ nav2_util::CallbackReturn RegulatedNavigator::on_configure(const rclcpp_lifecycl
   // 普通发布器用于绝对速度基准；它不是最终底盘速度出口。
   speed_limit_pub_ = this->create_publisher<nav2_msgs::msg::SpeedLimit>( speed_limit_topic_, rclcpp::QoS(10));
 
+  {
+    lattice_follow_client_ = rclcpp_action::create_client<FollowPath>(this, "lattice_exec/follow_path");
+    lattice_stop_pub_ = create_publisher<geometry_msgs::msg::Twist>(
+      "lattice_exec/cmd_vel_nav", rclcpp::SystemDefaultsQoS());
+    lattice_speed_pub_ = create_publisher<nav2_msgs::msg::SpeedLimit>(
+      "lattice_exec/speed_limit", rclcpp::QoS(10));
+    clear_local_client_ = create_client<ClearCostmap>(
+      "fixed_path_exec/local_costmap/clear_entirely_local_costmap");
+    clear_global_client_ = create_client<ClearCostmap>(
+      "lattice_exec/global_costmap/clear_entirely_global_costmap");
+    for (const auto lattice : {false, true})
+    {
+      auto & nodes = lattice ? lattice_execution_ : fixed_execution_;
+      const auto names = get_parameter(lattice ? "lattice_execution_nodes" :
+        "fixed_execution_nodes").as_string_array();
+      for (const auto & name : names)
+      {
+        ExecutionNode node;
+        node.client = create_client<StateService>(name + "/get_state");
+        nodes.push_back(std::move(node));
+      }
+    }
+  }
+
   tf_buffer_ = std::make_unique<tf2_ros::Buffer>(get_clock());
   tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
-  if (operation_mode_ == NavigationMode::FIXED_PATH && get_parameter("tf_diagnostics_enabled").as_bool())
-  {
-    tf_diagnostics_ = std::make_unique<TfDiagnostics>(*this, *tf_buffer_, global_frame_, robot_base_frame_, get_parameter("tf_diagnostics_log_frequency").as_double(), get_parameter("tf_diagnostics_map_base_frequency").as_double());
-  }
   const auto feedback_period = std::chrono::duration<double>(1.0 / feedback_frequency_);
   feedback_timer_ = create_wall_timer(std::chrono::duration_cast<std::chrono::milliseconds>(feedback_period), std::bind(&RegulatedNavigator::publishFeedback, this));
   monitor_timer_ = create_wall_timer(200ms, std::bind(&RegulatedNavigator::monitorTask, this));
@@ -380,7 +353,7 @@ nav2_util::CallbackReturn RegulatedNavigator::on_configure(const rclcpp_lifecycl
     velocity_log_timer_ = create_wall_timer(std::chrono::duration_cast<std::chrono::milliseconds>(velocity_log_period), std::bind(&RegulatedNavigator::logVelocityChain, this));
   }
 
-  LOG_INFO("独立规控导航器配置完成，operation_mode={}，定位跳变保护={}，平移阈值={:.3f}m，旋转阈值={:.3f}rad，速度日志={}Hz，反馈={}，控制器输出={}，平滑器输出={}", operation_mode, enable_localization_jump_detection_ ? "启用" : "关闭", max_translation_jump_, max_rotation_jump_, velocity_log_frequency_, velocity_odom_topic_, controller_cmd_vel_topic_, smoothed_cmd_vel_topic_);
+  LOG_INFO("独立规控导航器配置完成，定位跳变保护={}，平移阈值={:.3f}m，旋转阈值={:.3f}rad，速度日志={}Hz，反馈={}，控制器输出={}，平滑器输出={}", enable_localization_jump_detection_ ? "启用" : "关闭", max_translation_jump_, max_rotation_jump_, velocity_log_frequency_, velocity_odom_topic_, controller_cmd_vel_topic_, smoothed_cmd_vel_topic_);
   return nav2_util::CallbackReturn::SUCCESS;
 }
 
@@ -425,6 +398,7 @@ nav2_util::CallbackReturn RegulatedNavigator::on_deactivate(const rclcpp_lifecyc
   {
     chassis_control_subscriber_->deactivate();
   }
+  finishPending(false);
   cancelTask("节点停用");
   collision_state_.reset();
   collision_progress_paused_ = false;
@@ -453,12 +427,17 @@ nav2_util::CallbackReturn RegulatedNavigator::on_cleanup(const rclcpp_lifecycle:
   collision_progress_paused_ = false;
   cancelTask("节点清理");
   navigate_pose_server_.reset();
-  navigate_poses_server_.reset();
   navigation_service_server_.reset();
   compute_pose_client_.reset();
-  compute_poses_client_.reset();
-  smooth_client_.reset();
   follow_client_.reset();
+  lattice_follow_client_.reset();
+  lattice_stop_pub_.reset();
+  lattice_speed_pub_.reset();
+  fixed_execution_.clear();
+  lattice_execution_.clear();
+  outstanding_plans_ = 0;
+  fixed_path_outstanding_follows_ = 0;
+  frozen_outstanding_follows_ = 0;
   clear_local_client_.reset();
   clear_global_client_.reset();
   if (chassis_control_subscriber_)
@@ -467,7 +446,6 @@ nav2_util::CallbackReturn RegulatedNavigator::on_cleanup(const rclcpp_lifecycle:
   }
   chassis_control_subscriber_.reset();
   motion_state_subscriber_.reset();
-  goal_sub_.reset();
   controller_velocity_sub_.reset();
   smoothed_velocity_sub_.reset();
   velocity_odom_sub_.reset();

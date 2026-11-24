@@ -62,7 +62,21 @@ ChassisControlSubscriber::ChassisControlSubscriber(
     {
       throw std::invalid_argument("Unified chassis output requires navigation topic and authority callbacks");
     }
-    navigation_subscription_ = node.create_subscription<geometry_msgs::msg::Twist>(config_.navigation_topic, rclcpp::QoS(1).best_effort(), std::bind(&ChassisControlSubscriber::onNavigationVelocity, this, std::placeholders::_1));
+    navigation_subscription_ = node.create_subscription<geometry_msgs::msg::Twist>(
+      config_.navigation_topic, rclcpp::QoS(1).best_effort(),
+      [this](geometry_msgs::msg::Twist::ConstSharedPtr message)
+      {
+        onNavigationVelocity(0, *message);
+      });
+    if (!config_.lattice_navigation_topic.empty())
+    {
+      lattice_navigation_subscription_ = node.create_subscription<geometry_msgs::msg::Twist>(
+        config_.lattice_navigation_topic, rclcpp::QoS(1).best_effort(),
+        [this](geometry_msgs::msg::Twist::ConstSharedPtr message)
+        {
+          onNavigationVelocity(1, *message);
+        });
+    }
   }
 }
 

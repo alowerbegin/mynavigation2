@@ -126,7 +126,6 @@ regulated_navigator:
     use_sim_time: True
     global_frame: "map"
     robot_base_frame: "base_footprint"
-    operation_mode: "autonomous"
     goal_topic: "goal_pose"
     navigation_service_action: "navigation_service"
     fixed_path_visualization_topic: "fixed_path_plan"

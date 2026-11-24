@@ -18,6 +18,7 @@
   <depend>rclcpp</depend>
   <depend>rclcpp_action</depend>
   <depend>rclcpp_lifecycle</depend>
+  <depend>lifecycle_msgs</depend>
   <depend>pluginlib</depend>
   <depend>nav2_util</depend>
   <depend>std_msgs</depend>
@@ -54,7 +55,6 @@
   <exec_depend>rclpy</exec_depend>
   <exec_depend>action_msgs</exec_depend>
   <exec_depend>rcl_interfaces</exec_depend>
-  <exec_depend>lifecycle_msgs</exec_depend>
   <exec_depend>unique_identifier_msgs</exec_depend>
 
   <export>
