@@ -1,5 +1,4 @@
-// 底盘 MotionState 的线程安全快照接口。只将有限的 v_car/w_car 存入控制参考。
-// receive_time 使用 steady_clock 接收时刻，valid 表示曾接收有效反馈，不自动代表该反馈仍新鲜。
+// 定义 MotionState 的线程安全接收快照，记录有符号速度及单调接收时间，供遥控交接与反馈时效检查。
 
 #ifndef NAV2_REGULATED_MODULES__MOTION_STATE_SUBSCRIBER_HPP_
 #define NAV2_REGULATED_MODULES__MOTION_STATE_SUBSCRIBER_HPP_

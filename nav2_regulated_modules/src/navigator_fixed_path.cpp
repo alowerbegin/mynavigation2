@@ -1,5 +1,4 @@
-// NavigationService 分段请求的校验、几何采样、方向编码、可视化和速度上限发布。
-// 固定路径不走全局规划／路径平滑；直线也转换为共线三次贝塞尔控制点，以复用等弧长采样流程。
+// 将 NavigationService 的直线或三次贝塞尔分段采样为路径，校验几何并排队交接，随后在固定路径通道执行。
 
 #include "nav2_regulated_modules/regulated_navigator.hpp"
 #include "nav2_regulated_modules/detail/path_sample.hpp"
@@ -138,7 +137,7 @@ std::optional<nav_msgs::msg::Path> RegulatedNavigator::prepareFixedPath(const st
   return output;
 }
 
-// 仅允许 fixed_path、节点激活、分段非空、全段同向且 max_speed 有限为正。
+// 固定路径 Goal 要求节点激活、底盘准入、分段非空、全段同向且 max_speed 有限为正。
 // 几何连续性检查在接受后的 prepareFixedPath，故部分几何错误会以已接受后 ABORTED 结束。
 rclcpp_action::GoalResponse RegulatedNavigator::handleNavigationServiceGoal(const rclcpp_action::GoalUUID &, const std::shared_ptr<const NavigationService::Goal> goal)
 {
@@ -375,7 +374,7 @@ void RegulatedNavigator::publishFixedPath(const nav_msgs::msg::Path & path)
   LOG_INFO("固定路径与科技风边界已发布到 RViz2，path_topic={}，boundaries_topic={}，frame={}，路径点数={}，左右半宽={:.2f}m", fixed_path_visualization_topic_, fixed_path_boundaries_topic_, visualization_path.header.frame_id, visualization_path.poses.size(), fixed_path_boundary_half_width_);
 }
 
-// 固定路径复用保存的 active_path，自主任务重新进入规划。
+// 固定路径恢复复用 active_path，半自主恢复使用冻结路径当前段。
 // 是否还属于当前有效任务由 task_ 与上层状态机决定；不从已结束任务恢复。
 void RegulatedNavigator::resumeCurrentTask()
 {

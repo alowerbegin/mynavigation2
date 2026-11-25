@@ -1,3 +1,4 @@
+// 声明半自主冻结路径的控制包装器。底层 FixedPathController 负责平移跟踪，本类处理分段、旋转、定位质量、障碍等待及终点复核。
 #ifndef NAV2_REGULATED_MODULES__AUTONOMOUS_FIXED_CONTROLLER_HPP_
 #define NAV2_REGULATED_MODULES__AUTONOMOUS_FIXED_CONTROLLER_HPP_
 
@@ -35,12 +36,19 @@ public:
   }
 
 private:
+  // 发布带执行标识的控制阶段状态，供协调器区分当前段心跳与迟到消息。
   void status(const std::string & phase);
+  // 将定位失效转换为受控暂停，连续有效样本满足恢复条件后继续本段，持续异常交由超时处理。
   bool pauseForLocalization(bool valid, const geometry_msgs::msg::PoseStamped & pose, const geometry_msgs::msg::Twist & measured, double stamp, double steady_time);
+  // 对定位恢复后的指令逐周期限幅，避免暂停前后速度不连续。
   geometry_msgs::msg::Twist limitResumeCommand(const geometry_msgs::msg::Twist & command, double steady_time);
+  // 记录终点位置、航向、停稳及定位和反馈时间信息，便于逐项复核末端状态。
   void logTerminalReview(const geometry_msgs::msg::PoseStamped & pose, const geometry_msgs::msg::Twist & measured, double xy, double yaw, double xy_tolerance, bool stationary, double tf_stamp, double tf_age, double odom_age, double receive_age);
+  // 按预测运动检查车体足迹和扫掠区域，覆盖当前命令与制动相关的运动范围。
   bool trajectoryFree(const geometry_msgs::msg::PoseStamped & pose, const geometry_msgs::msg::Twist & measured, const geometry_msgs::msg::Twist & command);
+  // 检查末端微调候选位置的几何与成本地图条件。
   bool trimPoseAllowed(double x, double y) const;
+  // 在末端微调阶段生成受限平移或转向命令，结合误差与反馈速度决定动作。
   geometry_msgs::msg::Twist trimCommand(const geometry_msgs::msg::PoseStamped & pose, const geometry_msgs::msg::Twist & measured, double xy_tolerance);
   FixedPathController tracker_;
   std::shared_ptr<tf2_ros::Buffer> tf_;
@@ -48,7 +56,7 @@ private:
   std::unique_ptr<nav2_costmap_2d::FootprintCollisionChecker<nav2_costmap_2d::Costmap2D *>> collision_;
   rclcpp_lifecycle::LifecycleNode::SharedPtr node_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr status_pub_;
-  // 默认 1e-6 / 0.0 与历史行为一致；状态格模式由 Launch 传入更大的旋转判据与位置验收半径。
+  // 旋转距离与位置容差的节点回退为 1e-6／0.0，统一 Lattice 配置传入 0.025／0.05 米。
   double rotation_distance_ = 1e-6;
   double rotation_position_tolerance_ = 0.0;
   rclcpp::SubscriptionBase::SharedPtr odom_sub_;

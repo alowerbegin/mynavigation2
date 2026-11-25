@@ -1,5 +1,4 @@
-// 可选自适应终点制动的纯纵向计算。速度、距离、减速度和 jerk 分别为 m/s、m、m/s²、m/s³。
-// 本头文件不读参数也不发布速度；上层只有显式选择对应分支才使用这些包络和积分结果。
+// 可选自适应制动的纯纵向计算，返回停车距离、速度包络与减速度，由上层控制器选择和执行对应分支。
 #ifndef NAV2_REGULATED_MODULES__FIXED_PATH_SPEED_PROFILE_HPP_
 #define NAV2_REGULATED_MODULES__FIXED_PATH_SPEED_PROFILE_HPP_
 
@@ -19,9 +18,7 @@ struct FixedPathSpeedProfile
   double speed_limit;
 };
 
-// 先按速度插值得到命令减速度，再以不超过 0.4 m/s² 的规划减速度估算停车距离。
-// 预留 = 目标容差 + 距离裕量 + 速度×响应时间 + jerk 预留；可用距离再反推速度包络。
-// 仅先检查三个运动输入，减速度／jerk 等约束须由调用方保证有效，不能误写为函数完成所有参数校验。
+// 根据实测速度、剩余距离及制动约束计算速度包络；速度为 m/s，距离为 m，加速度为 m/s²，jerk 为 m/s³，约束合法性由调用方保证。
 inline FixedPathSpeedProfile calculateFixedPathSpeedProfile(const double measured_speed, const double remaining_distance, const double nominal_speed, const double max_deceleration, const double jerk_limit, const double response_time, const double distance_margin, const double goal_tolerance, const double approach_speed)
 {
   if (!std::isfinite(measured_speed) || !std::isfinite(remaining_distance) || !std::isfinite(nominal_speed) || measured_speed < 0.0 || remaining_distance < 0.0 || nominal_speed < 0.0)
@@ -41,8 +38,7 @@ inline FixedPathSpeedProfile calculateFixedPathSpeedProfile(const double measure
   return {deceleration, stopping_distance, speed_limit};
 }
 
-// 由速度差和 dt 求请求减速度，再限制它相对上周期的变化不超过 jerk_limit×dt。
-// 输出不低于 target_speed，next_deceleration 回传下周期状态；dt 必须由调用方保证为正。
+// 以正 dt 限制减速度每周期的变化幅值，积分后速度保持不低于 target_speed，next_deceleration 回传本轮减速度。
 inline double advanceFixedPathBrakingSpeed(const double previous_speed, const double target_speed, const double previous_deceleration, const double max_deceleration, const double jerk_limit, const double dt, double & next_deceleration)
 {
   const double requested_deceleration = std::clamp((previous_speed - target_speed) / dt, 0.0, max_deceleration);

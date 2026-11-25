@@ -1,5 +1,4 @@
-// 仅 autonomous_lattice 使用：一次状态格搜索，冻结前校正格心偏差与分箱航向。
-// autonomous_fixed 仍使用 autonomous_fixed_hybrid_planner.cpp，两者互不影响。
+// 当前半自主通道的 Lattice 包装规划器。完成状态格搜索后校正端点与起点残差，重新检查足迹及扫掠采样，再返回一次规划结果。
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -48,7 +47,7 @@ public:
     {
       throw nav2_core::PlannerException("Same-cell lattice result has no translation segment for precise arrival");
     }
-    // Rigid translation preserves curvature, yaw, path length and every direction-change cusp.
+    // 此处先对整条路径作等量平移，保留这一阶段的相对几何，后续再处理起点残差和末端航向。
     for (auto & pose : plan.poses)
     {
       pose.pose.position.x += dx;

@@ -1,5 +1,4 @@
-// 规划模块的配置归一化与只读访问器。重规划输入是 Hz，保存的是秒周期。
-// 这里不提交 ComputePath 或 SmoothPath Goal，真正调度位于 navigator_planning.cpp。
+// 保存规划插件的配置值并校验参数，供协调器查询 plannerId。历史平滑及重规划字段仍保留在此辅助类。
 
 #include "nav2_regulated_modules/planning_module.hpp"
 
@@ -42,7 +41,7 @@ bool PlanningModule::useSmoother() const
   return use_smoother_;
 }
 
-// 返回重规划周期 s，不是频率 Hz；monitorTask 用它比较 elapsed 时间。
+// 返回按配置频率换算的历史重规划周期，单位为秒；当前单次 Lattice 流程未调用此接口。
 double PlanningModule::replanPeriod() const
 {
   return 1.0 / replan_frequency_;

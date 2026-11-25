@@ -1,4 +1,4 @@
-# RViz 独立启动入口。根据命名空间和仿真时间装载可视化配置，不改变导航控制链。
+# 保留的通用 RViz 包装入口，处理命名空间、配置文件和退出事件。当前综合视图可通过 unified_rviz.launch.py 独立打开。
 
 # Copyright (c) 2018 Intel Corporation
 #

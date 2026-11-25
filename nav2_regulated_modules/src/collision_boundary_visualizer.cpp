@@ -1,3 +1,4 @@
+// 把碰撞区域或机器人边界转换为 RViz Marker，显示检测区域与状态。实际速度仲裁由对应监控器和底盘链处理。
 // Copyright (c) 2026 zpy
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,7 +24,6 @@
 #include <sstream>
 #include <string>
 #include <utility>
-// 注释掉的代码不参与编译。
 #include <vector>
 #include <unordered_map>
 #include "geometry_msgs/msg/point.hpp"
@@ -34,7 +34,6 @@
 #include "visualization_msgs/msg/marker_array.hpp"
 namespace nav2_regulated_modules
 {
-// 注释掉的代码不参与编译。
 // enum class LabelCorner
 // {
 //   UpperLeft,
@@ -80,7 +79,6 @@ namespace nav2_regulated_modules
 //   }
 //   );
 // }
-// 注释掉的代码不参与编译。
 // 创建 Marker 输出和参数指定的多边形订阅；只在新多边形回调时重绘，没有独立碰撞判定。
     CollisionBoundaryVisualizer() : Node("collision_boundary_visualizer")
     {
@@ -129,7 +127,6 @@ namespace nav2_regulated_modules
 //   }
 //   marker_pub_->publish(marker_array);
 // }
-// 注释掉的代码不参与编译。
 // 空多边形被忽略；非空消息按 topic 保存并触发全部已知边界重绘。
 // 缓存没有显式过期清理，不能用显示仍存在来证明输入源仍活跃。
     void handlePolygon( geometry_msgs::msg::PolygonStamped::SharedPtr message, const std::string & topic)
@@ -141,7 +138,6 @@ namespace nav2_regulated_modules
       polygons_[topic] = std::move(message);
       publishMarkers();
     }
-// 注释掉的代码不参与编译。
 // 遍历缓存，为每个有效区域生成一对线框与标签 Marker，再一次发布数组。
 // ID 由当前遍历顺序给出，不是外部区域固定编号。
     void publishMarkers()
@@ -161,7 +157,6 @@ namespace nav2_regulated_modules
       }
       marker_pub_->publish(marker_array);
     }
-// 注释掉的代码不参与编译。
 // 按不区分大小写的关键字推测显示类别，匹配优先级为 stop、approach、slow。
 // 这是显示约定，不读取 Collision Monitor 的实际 action_type 配置。
     ActionType typeForTopic(const std::string & topic) const
@@ -229,7 +224,6 @@ namespace nav2_regulated_modules
 //   marker.points.push_back(marker.points.front());
 //   return marker;
 // }
-// 注释掉的代码不参与编译。
 // 沿多边形顶点画闭合 LINE_STRIP，显示高度固定为 0.04 m，线宽 0.025 m。
 // frame_locked 保持其跟随输入坐标系，Marker 不修改原始 Polygon。
     visualization_msgs::msg::Marker makeLineMarker( const geometry_msgs::msg::PolygonStamped & polygon, int index, const BoundaryStyle & style) const
@@ -271,7 +265,6 @@ namespace nav2_regulated_modules
 //   marker.frame_locked = true;
 //   return marker;
 // }
-// 注释掉的代码不参与编译。
 // 在多边形外侧生成面向观察者的文字，使用独立命名空间避免与线框 ID 冲突。
     visualization_msgs::msg::Marker makeTextMarker( const geometry_msgs::msg::PolygonStamped & polygon, int index, const BoundaryStyle & style) const
     {
@@ -332,7 +325,6 @@ namespace nav2_regulated_modules
 //   position.z = 0.08;
 //   return position;
 // }
-// 注释掉的代码不参与编译。
 // 取输入多边形的 XY 包围盒，在最大 x/y 外各偏移 0.10 m，高度 0.08 m。
 // 它不是几何中心，也不做地图坐标变换。
     geometry_msgs::msg::Point labelPosition( const geometry_msgs::msg::PolygonStamped & polygon) const
@@ -362,7 +354,6 @@ namespace nav2_regulated_modules
       marker.color.b = style.blue;
       marker.color.a = 1.0;
     }
-// 注释掉的代码不参与编译。
 // const std::array<BoundaryStyle, 3> styles_
 // {
 //   {
@@ -383,7 +374,6 @@ namespace nav2_regulated_modules
 // std::array<rclcpp::Subscription<geometry_msgs::msg::PolygonStamped>::SharedPtr, 3> polygon_subs_;
 // rclcpp::Subscription<geometry_msgs::msg::PolygonStamped>::SharedPtr approach_footprint_sub_;
 // rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr marker_pub_;
-// 注释掉的代码不参与编译。
     std::unordered_map<std::string, geometry_msgs::msg::PolygonStamped::SharedPtr> polygons_;
     std::vector<rclcpp::Subscription<geometry_msgs::msg::PolygonStamped>::SharedPtr> polygon_subs_;
     rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr marker_pub_;

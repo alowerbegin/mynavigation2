@@ -1,3 +1,4 @@
+<!-- 注册固定路径跟踪控制器与末端检查器。插件类型名必须与控制器参数中的 plugin 字段一致。 -->
 <class_libraries>
   <library path="nav2_regulated_modules_fixed_path_controller">
     <class type="nav2_regulated_modules::FixedPathController" base_class_type="nav2_core::Controller">

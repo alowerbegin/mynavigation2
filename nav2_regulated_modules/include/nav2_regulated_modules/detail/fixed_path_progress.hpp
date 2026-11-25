@@ -1,4 +1,4 @@
-// 在原最近路径点相邻的有效线段上投影，计算剩余弧长；不改变最近点搜索或停车判据。
+// 在最近点相邻线段上投影当前位置，连续估算已走弧长与剩余距离，减少离散采样带来的进度跳变。
 #ifndef NAV2_REGULATED_MODULES__DETAIL__FIXED_PATH_PROGRESS_HPP_
 #define NAV2_REGULATED_MODULES__DETAIL__FIXED_PATH_PROGRESS_HPP_
 
@@ -15,8 +15,7 @@ namespace nav2_regulated_modules
 namespace detail
 {
 
-// 最近点前后各选一条有效线段，重复点跳过；不另行搜索远处路径分支。
-// 进度沿 Path 点序增加，与车辆前进／倒车的速度符号无关；无有效投影时返回 NaN。
+// 仅在最近点前后邻接的有效线段上投影，按路径点序计算剩余弧长；重复点跳过，无有效投影返回 NaN。
 inline double projectedRemainingDistance(const std::vector<StartPathPoint> & path, const std::size_t nearest_index, const double robot_x, const double robot_y)
 {
   const double invalid = std::numeric_limits<double>::quiet_NaN();

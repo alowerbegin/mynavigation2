@@ -1,6 +1,4 @@
-# 三模式规控的 Launch 装配：解析实参、重写 YAML、选择节点集合，再交给生命周期管理器激活。
-# LaunchConfiguration 是延迟求值对象；OpaqueFunction 在上下文可用后读取真实参数，不能在生成描述时当普通字符串使用。
-# 协调器在收到 Action Goal 后分配控制权。
+# 唯一规控主入口，装配常驻遥控、fixed_path_exec 和 lattice_exec 两条执行通道，并分别管理生命周期。导航任务由 Action Goal 触发。
 
 import os
 import yaml
@@ -18,14 +16,14 @@ from nav2_common.launch import RewrittenYaml
 
 
 class NavigationRewrittenYaml(RewrittenYaml):
-    """Apply mode-specific motion profiles without changing the shared YAML."""
+    """从共享参数基线生成固定路径与 Lattice 执行配置，保留每条通道自己的控制与限速参数。"""
 
     def __init__(self, **kwargs):
         self.navigation_kwargs = kwargs
         super().__init__(**kwargs)
 
     def loaded_fixed_path_parameters(self, context):
-        """Bound ordinary fixed-path longitudinal motion throughout the task."""
+        """构造固定路径控制和限速配置，保留共享基线中更严格的纵向约束。"""
         import tempfile
         baseline = super().perform(context)
         with open(baseline, encoding='utf-8') as stream:
@@ -60,24 +58,22 @@ class NavigationRewrittenYaml(RewrittenYaml):
         return output.name
 
     def fixed_parameters(self, context):
-        """Build the one-shot Lattice execution profile."""
+        """生成单次 Lattice 半自主通道配置，选择包装规划器、冻结路径控制器和分段到点检查器。"""
         import tempfile
         baseline = super().perform(context)
         with open(baseline, encoding='utf-8') as stream:
             document = yaml.safe_load(stream)
         namespace = perform_substitutions(context, normalize_to_list_of_substitutions(self.navigation_kwargs.get('root_key') or ''))
         config = document[namespace] if namespace else document
-        # 规划器与 costmap 停车开关统一由 params_file 的 autonomous_fixed_profile 决定。
+        # 此基线块提供障碍检查开关，当前半自主规划器由下方固定选择为 Lattice。
         profile = (config.get('autonomous_fixed_profile') or {}).get('ros__parameters') or {}
         obstacle_check_enabled = bool(profile.get('obstacle_check_enabled', True))
-        # 状态格模式当前使用 diff 基元（16 headings，间隔 22.5deg，半格 11.25deg）。
-        # 终点朝向阈值 9deg 沿用原 48-heading 配置，比该基元半格更严，末段朝向余量偏小。
-        # hybrid 模式沿用原减半要求。
+        # 当前 diff 基元含 16 个朝向，间隔 22.5°；最终航向容差约 9°，由包装器和协调器分别复核。
         lattice_yaw = 0.15726646259971647
         lattice_file = os.path.join(
             get_package_share_directory('nav2_smac_planner'),
             'sample_primitives', '5cm_resolution', '0.5m_turning_radius', 'diff', 'output.json')
-        # Only this mode uses a rectangular envelope and wider obstacle cost field.
+        # 为 Lattice 通道生成矩形足迹和独立膨胀代价参数。
         footprint = '[[0.6, 0.45], [0.6, -0.45], [-0.6, -0.45], [-0.6, 0.45]]'
         inflation = 0.90
         for name in ['global_costmap', 'local_costmap']:
@@ -203,8 +199,7 @@ FIXED_PATH_OVERRIDES = {
 }
 
 
-# 读取 YAML 和显式 Launch 覆盖，保留布尔／浮点类型并验证裕量关系。
-# 空覆盖沿用参数文件；此处的解析结果用于后续重写，不会热改已经运行的节点。
+# 读取参数文件并解析显式制动覆盖，空覆盖沿用 YAML 中的值。
 def resolve_braking_margin_arguments(context):
     with open(LaunchConfiguration('params_file').perform(context), encoding='utf-8') as stream:
         config = yaml.safe_load(stream) or {}
@@ -246,8 +241,7 @@ def resolve_braking_margin_arguments(context):
     return actions
 
 
-# 按命名空间读取平滑器参数块的 collision 话题与超时，校验后统一提供给三节点。
-# 超时必须是有限正数，不能只验证 YAML 中有这个键。
+# 核对碰撞状态话题和超时参数，再转成供两通道复用的启动配置。
 def resolve_collision_state_arguments(context):
     with open(LaunchConfiguration('params_file').perform(context), encoding='utf-8') as stream:
         config = yaml.safe_load(stream) or {}
@@ -262,10 +256,8 @@ def resolve_collision_state_arguments(context):
             SetLaunchConfiguration('resolved_collision_state_timeout', str(timeout))]
 
 
-# 诊断关闭时返回空 Action 列表；开启时从同份 YAML 提取真实反馈话题。
-# 只构造 Node 描述；是否真正启动由 Launch 执行阶段决定。
 def launch_unified(context, rewrites, rviz):
-    """Prepare separate parameter sets and lifecycle groups for both Action routes."""
+    """从共享 YAML 派生两份配置，为地图、协调器及执行通道分别创建生命周期管理组。"""
     import tempfile
 
     def arg(name):
@@ -280,12 +272,13 @@ def launch_unified(context, rewrites, rviz):
         substitutions[name + '.ros__parameters.collision_state_enabled'] = str(enabled).lower()
     profiles = NavigationRewrittenYaml(
         source_file=source, root_key='', param_rewrites=substitutions, convert_types=True)
-    # The unified entry always selects Lattice even if the legacy profile selects Hybrid.
+    # 半自主执行通道固定选择 Lattice，即使共享基线中仍记录 Hybrid 选项。
     adaptive = arg('adaptive_goal_braking_enabled').lower() == 'true'
     fixed_yaml = (RewrittenYaml.perform(profiles, context) if adaptive else
                   profiles.loaded_fixed_path_parameters(context))
     lattice_yaml = profiles.fixed_parameters(context)
 
+    # 读取启动替换后的参数文件，返回可按执行通道独立调整的字典。
     def load_profile(filename):
         with open(filename, encoding='utf-8') as stream:
             return yaml.safe_load(stream)
@@ -317,6 +310,7 @@ def launch_unified(context, rewrites, rviz):
             respawn=arg('use_respawn').lower() == 'true',
             arguments=['--ros-args', '--log-level', arg('log_level')]))
 
+    # 为指定命名空间添加生命周期管理器，autostart 决定是否自动配置并激活所列节点。
     def manage(label, namespace, names):
         node('nav2_lifecycle_manager', 'lifecycle_manager', 'lifecycle_manager_' + label,
              namespace, [{'use_sim_time': use_sim_time, 'autostart':
@@ -339,8 +333,7 @@ def launch_unified(context, rewrites, rviz):
             values['map_topic'] = prefix + 'map'
         for name in ('controller_server', 'velocity_smoother'):
             profile[name]['ros__parameters']['speed_limit_topic'] = 'speed_limit'
-        # Costmap2DROS is constructed inside its server and needs the fully qualified
-        # YAML keys carried in the same parameter file as the server node.
+        # Costmap2DROS 由所属服务器创建，生成文件同时携带服务器及成本地图的完整命名空间键。
         with tempfile.NamedTemporaryFile(
                 mode='w', prefix=channel + '-', suffix='.yaml', delete=False) as stream:
             yaml.safe_dump({channel_ns.strip('/'): profile}, stream)
@@ -364,6 +357,7 @@ def launch_unified(context, rewrites, rviz):
     lattice_navigator = lattice['regulated_navigator']['ros__parameters']
     navigator.update({key: value for key, value in lattice_navigator.items()
                       if key.startswith('autonomous_fixed_')})
+    # 协调器使用共享参数中的底盘接口，并把规划、跟踪和限速话题分别指向对应执行通道。
     navigator.update(
         planner_id='SmacLattice', use_smoother=False,
         enable_localization_jump_detection=arg('enable_localization_jump_detection').lower() == 'true',

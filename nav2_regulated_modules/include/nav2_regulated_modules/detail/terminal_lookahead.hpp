@@ -1,5 +1,4 @@
-// 终点前视距离混合的纯函数。normal、terminal、distance 均为 m。
-// 在距终点 0.5 m 到 0.1 m 区间内线性过渡；输入合法性由调用方保证，不在此处判断到点成功。
+// 在距终点 0.5～0.1 米的区间，将正常前视距离线性混合到终点前视距离，输入与输出均使用米。
 #ifndef NAV2_REGULATED_MODULES__DETAIL__TERMINAL_LOOKAHEAD_HPP_
 #define NAV2_REGULATED_MODULES__DETAIL__TERMINAL_LOOKAHEAD_HPP_
 #include <algorithm>

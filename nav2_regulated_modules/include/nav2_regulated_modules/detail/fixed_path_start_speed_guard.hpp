@@ -1,5 +1,4 @@
-// 每条新路径的起步保护与局部几何误差计算。保护距离按路径投影进度（m）判断，航向误差使用 rad。
-// 保护先启用，走满距离且误差连续达标才单向解除；新路径必须 reset，不能借旧任务稳定计数解除限速。
+// 维护每条新路径的起步保护，用投影进度、航向和连续稳定周期决定单向释放，新路径重新初始化保护状态。
 #ifndef NAV2_REGULATED_MODULES__DETAIL__FIXED_PATH_START_SPEED_GUARD_HPP_
 #define NAV2_REGULATED_MODULES__DETAIL__FIXED_PATH_START_SPEED_GUARD_HPP_
 

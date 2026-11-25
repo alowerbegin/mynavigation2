@@ -1,5 +1,4 @@
-// 固定路径 GoalChecker：结合末段几何、终点锁存及连续停稳周期判断 FollowPath 完成。
-// 终点航向不参与本检查器成功条件；位置状态与控制器外部独立精度验收仍需区分。
+// 声明固定路径 GoalChecker，通过末端几何锁存与连续停稳周期判断完成，终点航向由控制链其他环节处理。
 
 #ifndef NAV2_REGULATED_MODULES__FIXED_PATH_GOAL_CHECKER_HPP_
 #define NAV2_REGULATED_MODULES__FIXED_PATH_GOAL_CHECKER_HPP_

@@ -1,4 +1,4 @@
-"""Open the unified RViz view against the unified navigation coordinator."""
+"""打开双通道综合 RViz，并把 Nav2 面板的生命周期服务重映射到地图与协调器管理器。时间源由本文件参数决定。"""
 import os
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription

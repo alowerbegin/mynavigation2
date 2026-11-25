@@ -1,5 +1,4 @@
-// 独立速度链观测进程。按“解析后的话题＋消息类型”复用订阅，再按频率输出最新值快照。
-// 快照频率不是输入接收频率；missing 的零占位不是停车，count 不增长表示没有新样本。
+// 独立速度链日志节点。订阅各级速度与底盘反馈生成周期快照，实际订阅话题由本节点参数配置。
 #include <cmath>
 #include <filesystem>
 #include <memory>
@@ -17,7 +16,7 @@
 class VelocityDiagnostics : public rclcpp::Node
 {
 public:
-  // 校验快照频率，建立异步滚动日志与按模式选取的订阅。
+  // 校验快照频率，建立异步滚动日志，并按照话题参数创建速度与反馈订阅。
   // 文件失败仍保留终端输出，8192 条异步队列拥塞时覆盖旧记录，不能保证逐消息无丢失。
   VelocityDiagnostics() : Node("velocity_diagnostics")
   {

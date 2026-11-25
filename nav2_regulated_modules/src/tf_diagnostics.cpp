@@ -1,3 +1,4 @@
+// 采集 TF 消息和查询结果，区分源帧更新、接收间隔与查询年龄，辅助排查地图到车体的定位链。
 #include "nav2_regulated_modules/tf_diagnostics.hpp"
 
 #include <chrono>

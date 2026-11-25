@@ -1,3 +1,5 @@
+# 双 Action 综合 RViz 视图，显示 fixed_path_exec 和 lattice_exec 的成本地图、路径及统一地图。
+
 Panels:
 - Class: rviz_common/Displays
   Help Height: 0
@@ -19,6 +21,7 @@ Panels:
   Splitter Ratio: 0.5
 - Class: nav2_rviz_plugins/Navigation 2
   Name: Navigation 2
+# 全局坐标系、显示项、交互工具和视角设置。
 Visualization Manager:
   Class: ''
   Displays:
@@ -271,6 +274,7 @@ Visualization Manager:
       X: 0
       Y: 0
     Saved: null
+# 窗口位置和尺寸，仅影响本机布局。
 Window Geometry:
   Width: 1400
   Height: 900

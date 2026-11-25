@@ -1,5 +1,4 @@
-// 生命周期配置与 ROS 实体装配。构造时声明参数，configure 创建客户端／订阅／定时器，activate 开放业务入口。
-// C++ 内置默认、项目 YAML 和 Launch 重写是不同配置层；不要只读声明值就判断后台生效值。
+// 声明参数并按生命周期创建双 Action、规划和跟踪客户端、遥控接口及通道探测，生效值由节点回退、YAML 和 launch 重写共同决定。
 
 #include "nav2_regulated_modules/regulated_navigator.hpp"
 
@@ -25,7 +24,7 @@ RegulatedNavigator::RegulatedNavigator(const rclcpp::NodeOptions & options) : na
   declare_parameter("tf_diagnostics_enabled", true);
   declare_parameter("tf_diagnostics_log_frequency", 1.0);
   declare_parameter("tf_diagnostics_map_base_frequency", 100.0);
-  // 节点内置回退仍为 false；fixed_path 项目入口会按模式与启用开关统一注入 true／false。
+  // 节点回退为关闭，统一 launch 依据 enable_collision_state 向两个执行通道及协调器注入一致的开关。
   declare_parameter("collision_state_enabled", false);
   declare_parameter("collision_state_topic", "/collision_state");
   declare_parameter("collision_state_timeout", 0.5);
@@ -52,7 +51,7 @@ RegulatedNavigator::RegulatedNavigator(const rclcpp::NodeOptions & options) : na
   declare_parameter("autonomous_fixed_max_speed", 0.5);
   declare_parameter("autonomous_fixed_xy_tolerance", 0.01);
   declare_parameter("autonomous_fixed_yaw_tolerance", 0.15726646259971647);
-  // 中间段（换向点）位置复核容差：默认 1 cm 与原行为一致；状态格模式需放宽以吸收旋转滑移。
+  // 中间段节点回退容差为 0.01 米，统一 Lattice 配置将其覆盖为 0.02 米。
   declare_parameter("autonomous_fixed_cusp_xy_tolerance", 0.01);
   // 冻结路径分段判据，必须与控制器一致；状态格路径的毫米级拼接残差需按半格归为旋转段。
   declare_parameter("autonomous_fixed_rotation_distance", 1e-6);
@@ -110,7 +109,7 @@ RegulatedNavigator::RegulatedNavigator(const rclcpp::NodeOptions & options) : na
 }
 
 // 读取并校验配置，再创建客户端、Action 服务、订阅与定时器。
-// NavigationService 仅在 fixed_path 建立；标准自主入口虽已建立，接受回调仍检查运行模式。
+// 两个上层 Action 在配置阶段建立，接收 Goal 时核对激活状态、执行通道和底盘准入条件。
 nav2_util::CallbackReturn RegulatedNavigator::on_configure(const rclcpp_lifecycle::State &)
 {
   global_frame_ = get_parameter("global_frame").as_string();
@@ -120,7 +119,7 @@ nav2_util::CallbackReturn RegulatedNavigator::on_configure(const rclcpp_lifecycl
   fixed_path_boundaries_topic_ = get_parameter("fixed_path_boundaries_topic").as_string();
   fixed_path_controller_id_ = get_parameter("fixed_path_controller_id").as_string();
   fixed_path_goal_checker_id_ = get_parameter("fixed_path_goal_checker_id").as_string();
-  // 先按启动模式约束功能，即便参数设 true，非 fixed_path 也不会打开本导航器的状态门控。
+  // 按 collision_state_enabled 参数配置状态消费，与两条执行通道的速度门是否创建分别控制。
   collision_state_enabled_ = get_parameter("collision_state_enabled").as_bool();
   const auto collision_topic = get_parameter("collision_state_topic").as_string();
   collision_state_.configure(get_parameter("collision_state_timeout").as_double());

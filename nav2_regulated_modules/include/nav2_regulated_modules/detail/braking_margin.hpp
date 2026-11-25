@@ -1,5 +1,4 @@
-// 固定路径制动裕量的纯函数。low/high 是距离（m），transition 是速度（m/s），speed 保留符号但插值使用其绝对值。
-// 输出只是制动距离预留，不是速度命令；调用方负责参数校验与实际停车判定。
+// 固定路径制动裕量辅助函数，距离参数用米、过渡速度用米每秒，计算速度幅值前由调用方校验配置。
 #ifndef NAV2_REGULATED_MODULES__DETAIL__BRAKING_MARGIN_HPP_
 #define NAV2_REGULATED_MODULES__DETAIL__BRAKING_MARGIN_HPP_
 

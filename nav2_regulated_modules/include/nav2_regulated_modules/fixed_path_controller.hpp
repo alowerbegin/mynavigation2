@@ -1,5 +1,4 @@
-// 方向感知的固定路径 Controller 插件声明：起点策略、前视跟踪、终点制动与零速锁存。
-// 调用方通过 FollowPath 提供完整 Path；路径姿态编码车头方向，插件不重置定位，不直接向串口发送数据。
+// 声明固定路径跟踪器、起步保护、剩余弧长及末端控制状态。通过 TerminalAwareController 向外层暴露末端锁停与位置复核结果。
 
 #ifndef NAV2_REGULATED_MODULES__FIXED_PATH_CONTROLLER_HPP_
 #define NAV2_REGULATED_MODULES__FIXED_PATH_CONTROLLER_HPP_

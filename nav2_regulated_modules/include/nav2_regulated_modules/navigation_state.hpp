@@ -1,5 +1,4 @@
-// 导航模式、任务类别和执行阶段的共享定义；当前实现仍由启动模式决定可接受的入口。
-// generation 区分任务，规划和跟踪另有序号；三个维度配合丢弃迟到回调，不能只凭 Action 句柄非空判断当前任务。
+// 定义常驻双 Action 协调器的任务类型、执行阶段和共享快照，generation、规划序号与跟踪序号共同过滤旧回调。
 
 #ifndef NAV2_REGULATED_MODULES__NAVIGATION_STATE_HPP_
 #define NAV2_REGULATED_MODULES__NAVIGATION_STATE_HPP_
@@ -15,7 +14,7 @@
 namespace nav2_regulated_modules
 {
 
-// 三种互斥入口：遥控不运行导航栈；自主与固定路径共用规控节点。
+// 遥控与两类导航入口同时可用，实际运动权限由底盘仲裁器逐周期决定。
 
 // 单个任务的执行阶段；异步回调必须结合 generation 判断状态是否仍属于当前任务。
 enum class NavigationState
@@ -32,7 +31,7 @@ enum class NavigationState
   FAILED
 };
 
-// 区分 Action 与话题入口，以便向正确的客户端反馈结果。
+// 区分空闲、半自主单点 Action 与业务固定路径 Action，结果返回到各自的上层句柄。
 enum class TaskType
 {
   NONE,
@@ -43,21 +42,23 @@ enum class TaskType
 // 当前任务的共享快照；代次、路径和计时字段用于丢弃过时回调并监控进度。
 struct NavigationTask
 {
-  // 每接管一个新任务递增，作为异步规划及跟踪回调的有效性标识。
-  // 每次任务接管递增；旧回调携带旧值时应被忽略，不能把复用成员地址当同一任务。
+  // 每次任务接管递增，异步回调必须匹配本任务代次和对应的规划／跟踪序号。
   uint64_t generation { 0 };
+  // TO_POSE 对应半自主 Lattice，NAVIGATION_SERVICE 对应业务分段路径。
   TaskType type { TaskType::NONE };
+  // 状态字段描述当前任务阶段，未使用的历史枚举值仍保留在类型中。
   NavigationState state { NavigationState::IDLE };
   geometry_msgs::msg::PoseStamped goal;
+  // 历史多目标缓存字段保留，当前上层入口接收单点 Action 或业务分段路径。
   std::vector<geometry_msgs::msg::PoseStamped> goals;
   nav_msgs::msg::Path active_path;
-  // 以下时间用于总耗时、重规划节流和无进展超时判断。
+  // 以下时间用于任务耗时、单次规划等待和路径执行无进展超时判断。
   // ROS 时间用于导航耗时；暂停仿真／时钟回跳会影响此类计时，与 steady_clock 的接收超时不同。
   rclcpp::Time start_time { 0, 0, RCL_ROS_TIME };
   rclcpp::Time last_replan_time { 0, 0, RCL_ROS_TIME };
   rclcpp::Time last_progress_time { 0, 0, RCL_ROS_TIME };
   geometry_msgs::msg::PoseStamped last_progress_pose;
-  // 恢复次数与连续规划失败次数分别受各自上限约束。
+  // 记录恢复与规划失败的历史计数，当前单次规划失败直接结束半自主任务。
   int recovery_count { 0 };
   int localization_recovery_count = 0;
   int consecutive_planning_failures { 0 };

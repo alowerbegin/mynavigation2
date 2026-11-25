@@ -1,3 +1,4 @@
+// 终点制动、位置复核、航向对齐和连续停稳的纯状态机。捕获裕量限定等待范围，成功仍使用独立的位置与角度容差。
 #ifndef NAV2_REGULATED_MODULES__DETAIL__AUTONOMOUS_FIXED_TERMINAL_REVIEW_HPP_
 #define NAV2_REGULATED_MODULES__DETAIL__AUTONOMOUS_FIXED_TERMINAL_REVIEW_HPP_
 
@@ -8,6 +9,7 @@
 
 namespace nav2_regulated_modules::detail
 {
+// 各阶段区分制动、位置等待、航向调整、连续停稳及失败原因，供上层状态诊断。
 enum class FixedReviewPhase
 {
   BRAKE,
@@ -21,6 +23,7 @@ enum class FixedReviewPhase
   FAILED_POSITION_TIMEOUT
 };
 
+// 将终点复核枚举转换成稳定的状态名称，供诊断和状态消息使用。
 inline const char * fixedReviewPhaseName(const FixedReviewPhase phase)
 {
   switch (phase)
@@ -41,6 +44,7 @@ inline const char * fixedReviewPhaseName(const FixedReviewPhase phase)
 struct FixedTerminalReview
 {
   FixedReviewPhase phase = FixedReviewPhase::BRAKE;
+  // 连续制动、位置等待与最终停稳使用独立计时，避免把前一阶段等待并入后一阶段。
   bool brake_complete = false;
   std::optional<double> brake_since;
   std::optional<double> position_since;
@@ -58,7 +62,7 @@ struct FixedTerminalReview
   }
 };
 
-// 输入必须来自本周期的新鲜位姿／速度。捕获裕量只允许零速等待，不扩大成功容差。
+// 按制动、位置等待、航向对齐和停稳窗口推进复核；捕获裕量限制等待范围，采样中断会重建连续稳定计时。
 inline FixedReviewPhase reviewFixedTerminal(FixedTerminalReview & state, const double xy, const double yaw, const bool stationary, const double now, const double xy_tolerance, const double yaw_tolerance, const double brake_duration = 0.2, const double settle_duration = 0.5, const double review_timeout = 2.0, const double capture_margin = 0.02)
 {
   if (!std::isfinite(xy) || xy < 0.0 || !std::isfinite(yaw) || !std::isfinite(now) || !std::isfinite(xy_tolerance) || xy_tolerance <= 0.0 || !std::isfinite(yaw_tolerance) || yaw_tolerance <= 0.0 || !std::isfinite(brake_duration) || brake_duration <= 0.0 || !std::isfinite(settle_duration) || settle_duration <= 0.0 || !std::isfinite(review_timeout) || review_timeout <= settle_duration || !std::isfinite(capture_margin) || capture_margin <= 0.0)

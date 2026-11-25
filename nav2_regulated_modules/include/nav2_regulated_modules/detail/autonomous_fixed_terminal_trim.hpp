@@ -1,3 +1,4 @@
+// 终点局部位置微调的几何与限幅辅助函数。微调可行性仍由调用方结合定位和足迹检查判断。
 #ifndef NAV2_REGULATED_MODULES__DETAIL__AUTONOMOUS_FIXED_TERMINAL_TRIM_HPP_
 #define NAV2_REGULATED_MODULES__DETAIL__AUTONOMOUS_FIXED_TERMINAL_TRIM_HPP_
 
@@ -7,6 +8,7 @@
 
 namespace nav2_regulated_modules::detail
 {
+// 速度采用米每秒，距离预算采用米，timeout 采用秒，max_attempts 限制重试次数。
 struct FixedTrimLimits
 {
   double max_speed = 0.02;
@@ -32,6 +34,7 @@ struct FixedTrimState
   }
 };
 
+// 以单调时间差积分实测线速度绝对值，微调后的制动滑行也计入累计及单次距离；时间回退或间隔超过 0.2 秒返回失败。
 inline bool accountFixedTrim(FixedTrimState & state, const double now, const double linear)
 {
   if (!std::isfinite(now) || !std::isfinite(linear))
@@ -53,11 +56,13 @@ inline bool accountFixedTrim(FixedTrimState & state, const double now, const dou
   return true;
 }
 
+// 同时检查累计距离、单次距离与总时间预算是否仍有效。
 inline bool fixedTrimWithinBudget(const FixedTrimState & state, const FixedTrimLimits & limits, const double now)
 {
   return state.distance < limits.max_distance && state.step_distance < limits.max_step && (!state.started || (now >= *state.started && now - *state.started < limits.timeout));
 }
 
+// 在尝试次数、累计距离和总时间均允许时开始一次微调，单次距离重新计数。
 inline bool beginFixedTrim(FixedTrimState & state, const FixedTrimLimits & limits, const double now)
 {
   if (!std::isfinite(now) || state.active || state.attempts >= limits.max_attempts || state.distance >= limits.max_distance || (state.started && (now < *state.started || now - *state.started >= limits.timeout)))

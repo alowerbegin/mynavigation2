@@ -1,5 +1,4 @@
-// 无 BT 规控协调器的声明。入口 Action、规划／平滑／跟踪客户端、定位监控与底盘支路由生命周期统一管理。
-// remote／autonomous／fixed_path 在启动时选择；各入口按模式校验任务，发送另一类 Action 不会自动切换模式。
+// 声明常驻遥控与双 Action 的生命周期协调器，按任务类型路由规划、跟踪及限速，交接等待旧请求收口和新鲜停稳反馈。
 
 #ifndef NAV2_REGULATED_MODULES__REGULATED_NAVIGATOR_HPP_
 #define NAV2_REGULATED_MODULES__REGULATED_NAVIGATOR_HPP_
@@ -64,7 +63,7 @@ class RegulatedNavigator : public nav2_util::LifecycleNode
   explicit RegulatedNavigator(const rclcpp::NodeOptions & options = rclcpp::NodeOptions());
 
   // 读取并校验配置，再创建客户端、Action 服务、订阅与定时器。
-  // NavigationService 仅在 fixed_path 建立；标准自主入口虽已建立，接受回调仍检查运行模式。
+  // 两个上层 Action 在配置阶段建立，接收 Goal 时核对激活状态、执行通道和底盘准入条件。
   nav2_util::CallbackReturn on_configure(const rclcpp_lifecycle::State &) override;
   // 激活固定路径可视化与底盘支路，重置 collision 接收历史，再开放业务入口。
   // 这只表示生命周期就绪，不生成任务，也不证明定位／轮速已经新鲜。
@@ -80,29 +79,40 @@ class RegulatedNavigator : public nav2_util::LifecycleNode
   nav2_util::CallbackReturn on_shutdown(const rclcpp_lifecycle::State &) override;
 
 private:
+  // 进入 WAIT_START 并初始化单次规划任务的等待状态，准备定位、旧任务终态和停稳条件。
   void beginFixedAutonomy();
+  // 驱动首次规划、原路径执行和暂停恢复，监控状态心跳、定位质量、障碍等待及无进展超时。
   void monitorFixedAutonomy();
+  // 验证规划坐标系及请求目标误差，保存原路径、分段和指纹，随后等待首段执行条件。
   void freezeAutonomousPath(const nav_msgs::msg::Path & path);
+  // 按单调游标截取当前原始路径段，检查偏离距离及旧跟踪终态，再发送带新执行标识的 FollowPath。
   void followFrozenSegment(bool resume);
+  // 在当前段完成后复核段末位姿与停稳条件，决定切入下一段或完成上层单点 Action。
   void finishFrozenSegment();
+  // 解析控制器的执行状态心跳，用任务执行标识过滤旧状态，更新定位暂停和障碍等待依据。
   void onFixedExecutionStatus(const std_msgs::msg::String::SharedPtr message);
+  // 要求源时间年龄在 −0.05～0.2 秒内，平面线速度≤0.01 m/s、角速度≤0.05 rad/s，且反馈速度均为有限值。
   bool fixedVelocityStopped();
+  // 原始冻结路径及其分段保持几何一致，指纹用于检测执行前的意外变化。
   nav_msgs::msg::Path frozen_path_;
   std::vector<detail::FixedSegment> frozen_segments_;
   std::size_t frozen_segment_ = 0;
   std::size_t frozen_cursor_ = 0;
   std::size_t frozen_dispatch_first_ = 0;
   uint64_t frozen_fingerprint_ = 0;
+  // 单次规划锁存与在途跟踪计数分别约束规划次数和段间取消握手。
   bool frozen_plan_requested_ = false;
   bool frozen_follow_inflight_ = false;
   bool frozen_localization_wait_ = false;
   std::size_t frozen_outstanding_follows_ = 0;
+  // 每段派发使用递增执行标识，控制器状态心跳必须与当前派发匹配。
   int64_t frozen_execution_id_ = 0;
   int64_t frozen_last_dispatch_id_ = 0;
   std::string frozen_phase_;
   double frozen_wait_since_ = 0.0;
   double frozen_status_since_ = 0.0;
   double frozen_obstacle_since_ = -1.0;
+  // 等待窗口分开记录障碍、定位稳定与短暂停状态，避免一种等待覆盖另一种超时。
   std::optional<double> frozen_inhibited_since_;
   std::optional<double> frozen_stable_since_;
   std::optional<std::chrono::steady_clock::time_point> frozen_soft_pause_since_;
@@ -110,24 +120,16 @@ private:
   rclcpp::Subscription<std_msgs::msg::String>::SharedPtr frozen_status_sub_;
   rclcpp_lifecycle::LifecyclePublisher<nav_msgs::msg::Path>::SharedPtr frozen_path_pub_;
 
-  // 仅接受 autonomous 且激活的有效单点 Pose；behavior_tree 非空会拒绝。
-  // 这里只校验请求，规划发生在接受后的处理函数，不通过此函数切换启动模式。
+  // 仅接收通过统一准入且位姿有效的单点 Goal，behavior_tree 必须为空。
+  // 接收回调只做准入校验，规划在 Goal 排队并完成控制权交接后触发。
   rclcpp_action::GoalResponse handlePoseGoal(const rclcpp_action::GoalUUID & uuid, const std::shared_ptr<const NavigateToPose::Goal> goal);
-  // 逐点检查非空目标序列的有效性，并拒绝行为树 XML 请求。
-  // 多点任务的目标数量不等于已经计算出的路径点数量。
   // 仅当句柄属于当前单点任务时置取消标记，随后由监控周期执行取消流程。
   // 返回 ACCEPT 表示接受取消请求，不是下游 FollowPath 的终态或停稳确认。
   rclcpp_action::CancelResponse handlePoseCancel(const std::shared_ptr<NavigatePoseHandle> goal);
-  // 仅为当前多点任务设置取消标记，避免旧客户端取消新任务。
-  // 该回调本身不等待规划、平滑或控制子 Goal 结束。
-  // 先抢占现有任务，再递增 generation，保存目标并启动规划。
+  // 接受后的 Goal 先进入待执行队列并请求取消旧任务，交接完成才递增代次并启动单次规划。
   // 旧子 Goal 以异步方式取消，旧回调靠代次过滤，不把句柄重置视为取消握手完成。
   void handlePoseAccepted(const std::shared_ptr<NavigatePoseHandle> goal);
-  // 将多点目标复制到任务快照，末点作为最终目标，再发送多点规划请求。
-  // 后续已通过目标可被移除，原始输入序列与当前待办序列应区分。
-  // 将合法 goal_pose 纳入同一自主任务状态机，但没有对应上层 Action 结果句柄。
-  // 非 autonomous 或未激活时忽略；接管同样递增任务代次。
-  // 仅允许 fixed_path、节点激活、分段非空、全段同向且 max_speed 有限为正。
+  // 固定路径 Goal 要求节点激活、底盘准入、分段非空、全段同向且 max_speed 有限为正。
   // 几何连续性检查在接受后的 prepareFixedPath，故部分几何错误会以已接受后 ABORTED 结束。
   rclcpp_action::GoalResponse handleNavigationServiceGoal(const rclcpp_action::GoalUUID & uuid, const std::shared_ptr<const NavigationService::Goal> goal);
   // 当前固定路径句柄才设置 cancel_requested，监控周期随后处理。
@@ -154,26 +156,26 @@ private:
   // 先密集采样估计累计弧长，再按 interval（m）反查 t 输出近似等距路径。
   // 保留精确末点并合并近重复邻点；等距指空间弧长，不是控制器时间间隔。
   void generateBezierUniformPoints(const nav_msgs::msg::Path & input_path, double interval, nav_msgs::msg::Path & output_path);
-  // 查询当前位姿，为普通单点／多点 Action 计算时间、ETA 和剩余目标数。
+  // 查询当前位姿，为半自主单点 Action 计算时间、ETA、恢复次数和剩余距离。
   // 固定路径进度另在 FollowPath 反馈回调发布，不能把此定时器频率当作它的固定反馈频率。
   void publishFeedback();
   // 为固定路径发布 percentage=false 的正绝对限速，单位 m/s。
   // 倒车方向在 Path 姿态和控制器符号中表达，不能发布负 SpeedLimit 代替方向。
   void publishSpeedLimit();
 
-  // 按 server_timeout 等待规划、可选平滑及 FollowPath 服务发现。
+  // 查询半自主执行通道的规划、跟踪 Action 与生命周期就绪状态。
   // 服务可发现只证明通信入口存在，不证明地图、TF 或底盘反馈有效。
   bool dependenciesReady();
-  // 仅在 autonomous、任务有效且没有在途规划时提交请求。
+  // 仅在半自主单点任务有效且没有在途规划时提交一次请求。
   // generation 标识任务，plan_sequence 标识该任务的规划轮次；两者均匹配才接受回调。
   void startPlanning();
   // 同时比较 generation 和规划 sequence，拒绝旧任务或旧规划轮次的异步结果。
   // 它不检查机器人位置或路径质量，只承担回调归属判断。
   bool isCurrentPlan(uint64_t generation, uint64_t sequence) const;
-  // 平滑拒绝、失败或返回空路径时回退原始 Path；不把回退当成平滑已成功。
+  // 接收到有效的规划结果后直接冻结原路径并进入分段执行。
   void onPathReady(const nav_msgs::msg::Path & path);
-  // 累计连续规划失败；允许的周期重规划失败可继续旧 FollowPath。
-  // 不满足继续条件时进入恢复，而不是在本函数直接改变规划算法。
+  // 规划失败交由任务类型的恢复入口处理，半自主单点任务将结束为失败。
+  // 失败处理保持原规划算法及已冻结几何的约束。
   void handlePlanningFailure(const std::string & reason);
 
   // 按任务类别选择控制器与 GoalChecker，再异步发送完整 Path。
@@ -183,7 +185,7 @@ private:
   // 边界宽度是显示参数，不是碰撞检测区，也不限制实际行驶误差。
   void publishFixedPath(const nav_msgs::msg::Path & path);
   // 比较任务代次与跟踪轮次；同一任务换路径也会使旧 sequence 失效。
-  // 不能只比较 generation，否则周期重规划的旧跟踪结果可能干扰当前路径。
+  // 同一任务可能经历分段或原路径恢复，必须同时核对 follow_sequence，防止旧跟踪结果干扰当前段。
   bool isCurrentFollow(uint64_t generation, uint64_t sequence) const;
   // 向速度链入口连续发布三帧零 Twist，增加停车请求被下游收到的机会。
   // 不检查发布确认或实际轮速；若没有发布器直接返回，不承诺已经机械停稳。
@@ -204,24 +206,34 @@ private:
   // 在恢复轮次允许时取消子 Goal、发送零速并请求清空代价地图。
   // 清图请求异步发送；等待时间到后再尝试恢复，不在此确认清图或实际停车完成。
   void startRecovery(const std::string & reason);
-  // 固定路径复用保存的 active_path，自主任务重新进入规划。
+  // 固定路径恢复复用 active_path，半自主恢复使用冻结路径当前段。
   // 是否还属于当前有效任务由 task_ 与上层状态机决定；不从已结束任务恢复。
   void resumeCurrentTask();
-  // 依次处理取消、清图等待、TF 丢失／恢复、可选跳变、进度及自主重规划。
+  // 依次处理统一交接、取消、冻结路径监控、固定路径恢复、定位与进度检查。
   // collision 仅暂停固定路径无进展计时，不跳过前面的取消与定位处理。
   void monitorTask();
+  // 只有规划请求及两通道 FollowPath 的在途计数全部归零，才认为旧子任务已收口。
   bool unifiedDrained() const;
+  // 检查交接后的有效 MotionState，接收年龄≤反馈超时且线角速度幅值<0.001，同时要求导航输出满足静默窗口。
   bool unifiedStopped() const;
+  // 在接收 Goal 前检查生命周期、交接状态、底盘许可与定位，空闲启动还要求旧请求收口和实测停稳。
   bool admitUnified(bool lattice);
+  // 检查所选通道的 Action 可发现性及最近一秒内的 Active 状态，Lattice 还要求规划服务可用。
   bool executionReady(bool lattice) const;
+  // 先轮询状态并处理取消，再等待旧子任务收口和停稳，最后启动仍有效的待执行 Goal。返回 true 表示本周期由交接流程接管。
   bool monitorUnified();
+  // 异步轮询两条执行通道的生命周期状态，超时请求从客户端移除，失效缓存按未激活处理。
   void pollExecutionStates();
+  // 只处理尚未启动的 Goal，已请求取消的句柄返回 CANCELED；内部撤销返回 ABORTED，固定路径句柄收口后清空待执行路径。
   void finishPending(bool client_cancel);
+  // 将已取消任务的上层句柄报告为 CANCELED 或 ABORTED，再清理任务快照。正常激活期间由交接监控调用。
   void finishCancellation();
   void startFixedPath(const std::shared_ptr<NavigationServiceHandle> & goal,
     nav_msgs::msg::Path path);
   void startPose(const std::shared_ptr<NavigatePoseHandle> & goal);
+  // 按当前任务选择 FollowPath 客户端，单点任务进入 lattice_exec，业务固定路径进入 fixed_path_exec。
   rclcpp_action::Client<FollowPath>::SharedPtr followClient() const;
+  // 为当前执行通道选择 SpeedLimit 发布器，使两条通道的任务限速分别维护。
   rclcpp::Publisher<nav2_msgs::msg::SpeedLimit>::SharedPtr speedPublisher() const;
 
   using StateService = lifecycle_msgs::srv::GetState;
@@ -245,11 +257,9 @@ private:
   rclcpp_action::Client<FollowPath>::SharedPtr lattice_follow_client_;
   rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr lattice_stop_pub_;
   rclcpp::Publisher<nav2_msgs::msg::SpeedLimit>::SharedPtr lattice_speed_pub_;
-  // 自主模式同时检查 TF 源时间戳；固定路径保留最近变换查询与本机成功计时。
+  // 半自主单点任务检查 TF 源时间戳，固定路径查询成功后按当前节点时间记录有效性。
   // 新鲜定位仍不等于独立物理精度验收。
   bool lookupCurrentPose(geometry_msgs::msg::PoseStamped & pose);
-  // 多点任务中按 passed_goal_radius（m）移除已接近的前置目标，至少保留末点。
-  // 这是目标队列维护，不是 FollowPath 成功判定。
 
   // 对已持有句柄发送 async_cancel_goal，再重置本地句柄；可选递增轮次使旧回调失效。
   // 未等待取消响应／结果，不能称为下游全部终止；尚未拿到句柄的请求也不由这些分支直接取消。
@@ -257,13 +267,11 @@ private:
   // 进入取消状态、废弃旧回调、请求停车，再按上层句柄状态返回 canceled 或 abort。
   // 只有客户端正在取消的句柄报告 canceled；一般内部取消走 abort，随后清空任务。
   void cancelTask(const std::string & reason);
-  // 新任务接管前使旧规划／跟踪轮次失效，发出取消与停车请求并 abort 旧上层任务。
-  // 该流程不等待机械停稳，不应在注释中描述为已经完成安全控制权握手。
   // 向当前对应 Action 报告成功；固定路径另发 progress=1、finish=true 后清理任务。
   // 上层成功由下游结果触发，不直接证明外部精度验收、定位覆盖或真实底盘制动距离合格。
   void succeedTask();
   // 废弃子 Goal 并向现有上层句柄报告失败，再清理任务快照。
-  // 此函数自身没有调用 stopRobot；停车效果不能从函数名或本地状态归零推断。
+  // 失败流程请求 stopRobot 并取消子任务，后续启动仍需经过交接监控的请求收口与实测停稳检查。
   void failTask(const std::string & reason);
   // 清除任务与诊断历史；固定路径结束时发布 0 SpeedLimit 清除该任务基准。
   // 0 在插件接口中的语义与 collision_task_speed 清理需区分，不代表独立停车命令。
@@ -338,7 +346,7 @@ private:
   rclcpp::Time localization_stable_since_ { 0, 0, RCL_ROS_TIME };
   rclcpp::Time recovery_ready_time_ { 0, 0, RCL_ROS_TIME };
   geometry_msgs::msg::PoseStamped last_pose_;
-  // 平滑失败回退使用的原始规划路径；对应回调必须先通过当前规划代次检查。
+  // 保留的历史原始路径缓存，当前规划成功后通过 onPathReady 直接冻结结果。
   nav_msgs::msg::Path pending_raw_path_;
   geometry_msgs::msg::Twist latest_controller_velocity_;
   geometry_msgs::msg::Twist latest_smoothed_velocity_;

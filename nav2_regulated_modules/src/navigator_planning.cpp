@@ -1,4 +1,4 @@
-// 自主任务的规划、可选平滑与跟踪衔接，使用异步 Action 回调避免把旧结果写入新任务。
+// 仅为半自主单点任务提交一次 ComputePathToPose。规划回调核对任务代次和请求序号，成功路径进入冻结与分段执行。
 
 #include "nav2_regulated_modules/regulated_navigator.hpp"
 
@@ -11,7 +11,7 @@
 namespace nav2_regulated_modules
 {
 
-// 按 server_timeout 等待规划、可选平滑及 FollowPath 服务发现。
+// 查询半自主执行通道的规划、跟踪 Action 与生命周期就绪状态。
 // 服务可发现只证明通信入口存在，不证明地图、TF 或底盘反馈有效。
 bool RegulatedNavigator::dependenciesReady()
 {
@@ -74,7 +74,7 @@ void RegulatedNavigator::startPlanning()
       }
     }
   };
-  // 规划结果先验证归属，再检查结果码、对象与非空 Path；通过后才进入可选平滑／跟踪。
+  // 规划结果先验证归属，再检查结果码和非空路径，随后冻结路径并进入分段跟踪准备。
   options.result_callback = [this, generation, sequence](const auto & result)
   {
     --outstanding_plans_;

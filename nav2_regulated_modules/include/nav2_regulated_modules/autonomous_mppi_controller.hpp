@@ -1,3 +1,4 @@
+// 保留的 MPPI 包装控制器与停稳 GoalChecker 声明。用于配置显式引用这些插件的控制链。
 #ifndef NAV2_REGULATED_MODULES__AUTONOMOUS_MPPI_CONTROLLER_HPP_
 #define NAV2_REGULATED_MODULES__AUTONOMOUS_MPPI_CONTROLLER_HPP_
 
@@ -12,7 +13,7 @@
 namespace nav2_regulated_modules
 {
 
-// 仅由自主模式的参数重写选择；固定路径继续加载原插件。
+// 该包装器供显式选择其 plugin 类型的配置加载，当前统一 launch 的半自主通道采用冻结路径控制包装器。
 class AutonomousMPPIController : public nav2_rotation_shim_controller::RotationShimController
 {
 public:

@@ -1,3 +1,4 @@
+// 实现双 Action 交接的后台监控，包括生命周期轮询、在途请求计数、停稳确认和待执行 Goal 的启动。
 #include "nav2_regulated_modules/regulated_navigator.hpp"
 
 #include <algorithm>
@@ -8,22 +9,26 @@ namespace nav2_regulated_modules
 {
 
 
+// 按当前任务选择 FollowPath 客户端，单点任务进入 lattice_exec，业务固定路径进入 fixed_path_exec。
 rclcpp_action::Client<RegulatedNavigator::FollowPath>::SharedPtr RegulatedNavigator::followClient() const
 {
   return task_.type == TaskType::TO_POSE ? lattice_follow_client_ : follow_client_;
 }
 
+// 为当前执行通道选择 SpeedLimit 发布器，使两条通道的任务限速分别维护。
 rclcpp::Publisher<nav2_msgs::msg::SpeedLimit>::SharedPtr RegulatedNavigator::speedPublisher() const
 {
   return task_.type == TaskType::TO_POSE ? lattice_speed_pub_ : speed_limit_pub_;
 }
 
+// 只有规划请求及两通道 FollowPath 的在途计数全部归零，才认为旧子任务已收口。
 bool RegulatedNavigator::unifiedDrained() const
 {
   return outstanding_plans_ == 0 && fixed_path_outstanding_follows_ == 0 &&
     frozen_outstanding_follows_ == 0;
 }
 
+// 检查交接后的有效 MotionState，接收年龄≤反馈超时且线角速度幅值<0.001，同时要求导航输出满足静默窗口。
 bool RegulatedNavigator::unifiedStopped() const
 {
   const auto feedback = motion_state_subscriber_->latestState();
@@ -35,6 +40,7 @@ bool RegulatedNavigator::unifiedStopped() const
     chassis_control_subscriber_->navigationOutputStopped(stopping_since_);
 }
 
+// 异步轮询两条执行通道的生命周期状态，超时请求从客户端移除，失效缓存按未激活处理。
 void RegulatedNavigator::pollExecutionStates()
 {
   const auto time = std::chrono::steady_clock::now();
@@ -66,6 +72,7 @@ void RegulatedNavigator::pollExecutionStates()
   }
 }
 
+// 检查所选通道的 Action 可发现性及最近一秒内的 Active 状态，Lattice 还要求规划服务可用。
 bool RegulatedNavigator::executionReady(const bool lattice) const
 {
   const auto & nodes = lattice ? lattice_execution_ : fixed_execution_;
@@ -80,6 +87,7 @@ bool RegulatedNavigator::executionReady(const bool lattice) const
       });
 }
 
+// 在接收 Goal 前检查生命周期、交接状态、底盘许可与定位，空闲启动还要求旧请求收口和实测停稳。
 bool RegulatedNavigator::admitUnified(const bool lattice)
 {
   if (!active_ || pending_fixed_ || pending_pose_ || task_.state == NavigationState::CANCELING ||
@@ -95,6 +103,7 @@ bool RegulatedNavigator::admitUnified(const bool lattice)
   return lookupCurrentPose(pose);
 }
 
+// 只处理尚未启动的 Goal，已请求取消的句柄返回 CANCELED；内部撤销返回 ABORTED，固定路径句柄收口后清空待执行路径。
 void RegulatedNavigator::finishPending(const bool client_cancel)
 {
   const auto finish = [client_cancel](auto & handle, const auto & result)
@@ -128,6 +137,7 @@ void RegulatedNavigator::finishPending(const bool client_cancel)
   }
 }
 
+// 先轮询状态并处理取消，再等待旧子任务收口和停稳，最后启动仍有效的待执行 Goal。返回 true 表示本周期由交接流程接管。
 bool RegulatedNavigator::monitorUnified()
 {
   pollExecutionStates();

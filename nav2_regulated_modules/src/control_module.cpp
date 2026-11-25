@@ -1,5 +1,4 @@
-// 普通导航跟踪配置的实现。configure 归一化超时后保存标识，访问器返回该快照。
-// 本模块没有 ROS 发布器、Action 客户端或独立线程；修改成员不等于重新配置 Controller Server。
+// 实现控制插件 ID 与进度超时的配置存取，配置阶段校验参数，供导航任务下发控制时使用。
 
 #include "nav2_regulated_modules/control_module.hpp"
 

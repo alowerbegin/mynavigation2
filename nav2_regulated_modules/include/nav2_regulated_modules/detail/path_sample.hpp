@@ -1,5 +1,4 @@
-// 路径采样拼接去重。要求 Pose 提供 pose.position.x/y，Sequence 支持 back、push_back 与赋值。
-// 重复位置用新样本替换旧末点，以保留精确业务终点；只处理邻接点，不承担路径可行性或碰撞检查。
+// 合并相邻二维距离≤1e-9 米的采样点，用新末点保留精确业务终点与姿态，其余位置按原顺序追加。
 #ifndef NAV2_REGULATED_MODULES__DETAIL__PATH_SAMPLE_HPP_
 #define NAV2_REGULATED_MODULES__DETAIL__PATH_SAMPLE_HPP_
 

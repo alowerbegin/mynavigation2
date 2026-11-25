@@ -1,13 +1,13 @@
-# 规控包运行参数。各节点参数在下方逐项说明；标注的是本配置文件的当前设置，不等同于插件内置默认值。
+# 共享参数基线，由主 launch 派生两条执行通道与协调器配置；各项基线值和插件内置回退值分别解释。
 
-# autonomous_fixed 只由 launch 读取，不作为节点参数传给任何节点。
+# 半自主配置的历史基线，当前 launch 始终选择 Lattice，保留此块的其余可配置项。
 autonomous_fixed_profile:
   ros__parameters:
     planner: hybrid
     # false 关闭控制器基于 local_costmap 足迹的零速停车判据。
     obstacle_check_enabled: true
 
-# 路径规划服务器：提供多种规划插件并按请求选择。
+# 规划服务基线，当前仅 lattice_exec 创建规划器进程，并用生成配置选择 SmacLattice。
 planner_server:
   # 该 ROS 节点的参数集合。
   ros__parameters:
@@ -20,7 +20,7 @@ planner_server:
     # 注册到规划服务器的规划器标识列表。
     planner_plugins: ["GridBased", "GridBasedAstar", "Smac2D", "SmacHybrid", "SmacLattice", "ThetaStar"]
 
-    # Navfn 的 Dijkstra 配置。
+    # 保留的 NavFn Dijkstra 配置。
     GridBased:
       # 该实例加载的插件类名。
       plugin: "nav2_navfn_planner/NavfnPlanner"
@@ -31,7 +31,7 @@ planner_server:
       # 是否允许路径经过未知栅格。
       allow_unknown: true
 
-    # Navfn 的 A* 配置。
+    # 保留的 NavFn A* 配置。
     GridBasedAstar:
       # 该实例加载的插件类名。
       plugin: "nav2_navfn_planner/NavfnPlanner"
@@ -42,7 +42,7 @@ planner_server:
       # 是否允许路径经过未知栅格。
       allow_unknown: true
 
-    # 二维栅格 Smac 规划器。
+    # 保留的二维 Smac 搜索配置。
     Smac2D:
       # 该实例加载的插件类名。
       plugin: "nav2_smac_planner/SmacPlanner2D"
@@ -77,7 +77,7 @@ planner_server:
         # 是否对平滑结果继续细化。
         do_refinement: true
 
-    # 混合状态空间 Smac 规划器。
+    # 保留的 Hybrid A* 参数，统一 Lattice 通道会覆盖所选规划器。
     SmacHybrid:
       # 该实例加载的插件类名。
       plugin: "nav2_smac_planner/SmacPlannerHybrid"
@@ -134,7 +134,7 @@ planner_server:
         # 是否对平滑结果继续细化。
         do_refinement: true
 
-    # 运动基元格规划器。
+    # 状态格搜索基线，launch 为半自主通道注入运动基元文件及 Lattice 包装插件。
     SmacLattice:
       # 该实例加载的插件类名。
       plugin: "nav2_smac_planner/SmacPlannerLattice"
@@ -177,7 +177,7 @@ planner_server:
       # 是否对规划路径执行平滑。
       smooth_path: true
 
-    # 任意角度 Theta* 规划器。
+    # 保留的任意角度 Theta* 规划配置。
     ThetaStar:
       # 该实例加载的插件类名。
       plugin: "nav2_theta_star_planner/ThetaStarPlanner"
@@ -192,7 +192,7 @@ planner_server:
       # 是否采用末段行进方向作为终点朝向。
       use_final_approach_orientation: false
 
-# 规控协调节点：管理导航任务、固定路径、底盘指令和恢复。
+# 协调器任务、定位及底盘接口基线，两个 Action 的通道路由会由统一 launch 注入。
 regulated_navigator:
   # 该 ROS 节点的参数集合。
   ros__parameters:
@@ -324,7 +324,7 @@ regulated_navigator:
     # 底盘角减速加加速度上限，单位弧度每三次方秒。
     chassis_angular_decel_jerk_max: 3.0
 
-# 路径跟踪服务器：加载控制器及进度／目标检查器。
+# 两通道控制器参数来源，launch 为 fixed_path_exec 和 lattice_exec 选择不同插件集合。
 controller_server:
   # 该 ROS 节点的参数集合。
   ros__parameters:
@@ -353,7 +353,7 @@ controller_server:
     # 注册到控制服务器的控制器列表。
     controller_plugins: ["DWB", "RPP", "FixedPathController", "MPPI", "GracefulController", "RotationShimController"]
 
-    # 进度检查器实例，负责检测机器人是否持续移动。
+    # 无进展检查器，固定路径与半自主生成配置可采用各自的等待上限。
     progress_checker:
       # 该实例加载的插件类名。
       plugin: "nav2_controller::SimpleProgressChecker"
@@ -388,7 +388,7 @@ controller_server:
       # 认定旋转停止的速度阈值，单位弧度每秒。
       rot_stopped_velocity: 0.05
 
-    # 固定路径专用目标检查器实例，仅按位置和停车状态判定。
+    # 业务固定路径的末端检查器，沿路径几何、航向与轮速判定到点。
     fixed_path_goal_checker:
       # 该实例加载的插件类名。
       plugin: "nav2_regulated_modules::FixedPathGoalChecker"
@@ -529,7 +529,7 @@ controller_server:
       # RPP 通用导航跟踪允许的横向误差，单位米。
       max_horizontal_error: 0.5
 
-    # 固定路径专用控制器。
+    # 固定路径跟踪与终点控制基线，半自主包装器还会复制此块到 tracker。
     FixedPathController:
       # 该实例加载的插件类名。
       plugin: "nav2_regulated_modules::FixedPathController"
@@ -614,7 +614,7 @@ controller_server:
       # 允许的 TF 时间误差，单位秒。
       transform_tolerance: 0.2
 
-    # 模型预测路径积分控制器。
+    # 保留的采样预测控制器参数，当前两条执行通道的插件列表由 launch 明确选择。
     MPPI:
       # 该实例加载的插件类名。
       plugin: "nav2_mppi_controller::MPPIController"
@@ -802,7 +802,7 @@ controller_server:
       # 是否允许倒车控制。
       allow_backward: false
 
-    # 大航向误差旋转包装控制器。
+    # 保留的航向预对齐包装器参数，是否加载由实际 controller_plugins 决定。
     RotationShimController:
       # 该实例加载的插件类名。
       plugin: "nav2_rotation_shim_controller::RotationShimController"
@@ -889,7 +889,7 @@ controller_server:
       RotateToGoal.slowing_factor: 5.0
       RotateToGoal.lookahead_time: -1.0
 
-# 路径平滑服务器：处理规划路径的几何平滑。
+# 保留的路径平滑服务器参数，当前单次 Lattice 路径直接冻结，主入口未创建该服务器。
 smoother_server:
   # 该 ROS 节点的参数集合。
   ros__parameters:
@@ -908,7 +908,7 @@ smoother_server:
       # 是否对平滑结果继续细化。
       do_refinement: true
 
-# 速度平滑节点：限制速度、加速度并处理输入超时。
+# 两通道各有速度平滑器实例，话题在各自命名空间内解析。
 velocity_smoother:
   # 该 ROS 节点的参数集合。
   ros__parameters:
@@ -949,7 +949,7 @@ velocity_smoother:
     # 输入速度指令超时阈值，单位秒。
     velocity_timeout: 1.0
 
-# 碰撞监控节点：依据传感器点与区域关系停止或缩放速度。
+# 可选导航速度门，use_collision_velocity_gate 决定是否在每条执行通道创建实例。
 collision_monitor:
   # 该 ROS 节点的参数集合。
   ros__parameters:
@@ -973,6 +973,7 @@ collision_monitor:
     robot_half_length: 0.265
     robot_half_width: 0.18
 
+    # 停车区域参数由碰撞监控器解释，实际区域尺寸和坐标系应与车体匹配。
     PolygonStopL3:
       type: "polygon"
       shape: "box"
@@ -985,6 +986,7 @@ collision_monitor:
       polygon_pub_topic: "collision_stop_zone"
       enabled: true
 
+    # 第二级减速区域，速度门和外部状态消费是各自独立的配置。
     PolygonSlowL2:
       type: "polygon"
       shape: "box"
@@ -998,6 +1000,7 @@ collision_monitor:
       polygon_pub_topic: "collision_slowdown_zone"
       enabled: true
 
+    # 第一级减速区域，传感器有效性仍受对应 observation source 参数约束。
     PolygonSlowL1:
       type: "polygon"
       shape: "box"
@@ -1022,7 +1025,7 @@ collision_monitor:
       # 是否启用当前评分器。
       enabled: true
 
-# 静态地图服务节点；读取 yaml_filename 指定的地图。
+# 共享静态地图服务器，生成配置为两条执行通道的成本地图设置共享地图话题。
 map_server:
   # 该 ROS 节点的参数集合。
   ros__parameters:
@@ -1032,7 +1035,7 @@ map_server:
     yaml_filename: ""
 
 
-# 局部代价地图：供近场避障和控制使用。
+# 局部成本地图模板，随各自控制器实例化，TF 使用公共 map 与 base_link。
 local_costmap:
   # 局部代价地图：供近场避障和控制使用。
   local_costmap:
@@ -1113,7 +1116,7 @@ local_costmap:
       # 发布更新时是否总发送整幅代价地图。
       always_send_full_costmap: true
 
-# 全局代价地图：供全局规划使用。
+# 全局成本地图模板，供规划服务构建搜索环境，实时图层依赖实际传感器输入。
 global_costmap:
   # 全局代价地图：供全局规划使用。
   global_costmap:
@@ -1184,7 +1187,7 @@ global_costmap:
       # 发布更新时是否总发送整幅代价地图。
       always_send_full_costmap: true
 
-# 键盘遥控节点：将按键转换为控制命令。
+# 保留的独立键盘遥控配置。当前主入口直接接收 ChassisControl，键盘进程需由使用方启动。
 myagv_keyboard_control:
   # 该 ROS 节点的参数集合。
   ros__parameters:

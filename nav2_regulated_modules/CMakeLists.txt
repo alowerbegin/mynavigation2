@@ -1,5 +1,4 @@
-# 构建结构：协调器进程、固定路径插件、诊断和边界可视化分别生成目标。
-# 头文件、Launch 和资源安装到各自前缀；BUILD_TESTING 控制回归目标，不代表测试在构建时自动运行。
+# 构建并安装规控节点、控制器、规划器及配套资源。双 Action 协调器链接 navigator_unified.cpp，生命周期查询依赖 lifecycle_msgs。
 cmake_minimum_required(VERSION 3.8)
 project(nav2_regulated_modules)
 
@@ -165,6 +164,8 @@ include(CTest)
 # 将 collision 测试客户端安装为 ros2 run 可执行脚本；安装不代表它会随 Launch 自动运行。
 install(PROGRAMS tools/collision_action_test.py DESTINATION lib/${PROJECT_NAME})
 # 以下注册纯算法／Launch／窗口测试；CTest 执行与 colcon 构建是两个步骤，未执行不能宣称测试通过。
+
+# 以下分支只注册本地回归目标，运行测试仍需显式调用 CTest 或对应脚本。
 if(BUILD_TESTING)
   add_executable(autonomous_fixed_localization_test test/autonomous_fixed_localization_test.cpp)
   target_include_directories(autonomous_fixed_localization_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)

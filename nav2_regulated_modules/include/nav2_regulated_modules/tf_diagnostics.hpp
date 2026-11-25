@@ -1,3 +1,4 @@
+// 声明 TF 接收与查询的诊断组件。区分变换的源时间、接收时间和采样时间，帮助判断断流与重复数据。
 #ifndef NAV2_REGULATED_MODULES__TF_DIAGNOSTICS_HPP_
 #define NAV2_REGULATED_MODULES__TF_DIAGNOSTICS_HPP_
 

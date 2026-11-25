@@ -1,3 +1,4 @@
+// 自主导航相关的反馈、时效、末端控制和进度辅助函数。保留插件及测试也会调用本文件，具体接入以调用点为准。
 #ifndef NAV2_REGULATED_MODULES__DETAIL__AUTONOMOUS_NAVIGATION_HPP_
 #define NAV2_REGULATED_MODULES__DETAIL__AUTONOMOUS_NAVIGATION_HPP_
 
@@ -61,7 +62,7 @@ inline const char * autonomousArrivalBlocker(const bool position_ok, const bool 
   return stable ? "READY" : "SETTLING";
 }
 
-// 只在自主模式调用；旋转必须使朝向误差下降，避免来回摆动一直刷新进度。
+// 自主进度辅助判据结合位移、航向与距离改善；调用方决定何时使用该结果刷新进度。
 inline bool autonomousProgress(const double translation, const double heading_improvement, const double distance_improvement, const double goal_distance, const double min_translation, const double min_rotation, const double min_goal_improvement)
 {
   return translation >= min_translation || heading_improvement >= min_rotation || (goal_distance <= 0.3 && distance_improvement >= min_goal_improvement);

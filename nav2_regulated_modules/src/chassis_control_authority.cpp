@@ -1,5 +1,4 @@
-// fixed_path 的唯一底盘出口。默认回调组串行执行，mutex_ 保护遥控目标与出口状态。
-// 交接／反馈失效发保护性零速；正常导航透传原平滑输出，遥控保留原 S 曲线及限幅。
+// 仲裁双导航通道和遥控的最终底盘输出。交接检查旧子任务收口及反馈停稳，导航缓存按通道与跟踪代次隔离。
 #include "nav2_regulated_modules/chassis_control_subscriber.hpp"
 
 #include <cmath>
@@ -9,16 +8,19 @@
 namespace nav2_regulated_modules
 {
 
+// 以单调接收时间判断底盘反馈的新鲜度，避免 ROS 时间变化干扰控制权接管条件。
 bool ChassisControlSubscriber::motionFresh(const MotionStateSnapshot & state) const
 {
   return state.valid && std::chrono::duration<double>(std::chrono::steady_clock::now() - state.receive_time).count() <= config_.motion_state_timeout;
 }
 
+// 在反馈新鲜的前提下同时要求线速度与角速度低于停稳阈值。
 bool ChassisControlSubscriber::motionStopped(const MotionStateSnapshot & state) const
 {
   return motionFresh(state) && std::abs(state.linear_velocity) < 1e-3 && std::abs(state.angular_velocity) < 1e-3;
 }
 
+// 检查统一出口是否唯一、遥控是否释放及交接是否完成，已有导航允许合法的新路径请求抢占。
 bool ChassisControlSubscriber::canStartNavigation()
 {
   std::lock_guard<std::mutex> lock(mutex_);
@@ -34,6 +36,7 @@ bool ChassisControlSubscriber::canStartNavigation()
   return config_.navigation_active() || (config_.navigation_drained() && motionStopped(motion_state_subscriber_.latestState()));
 }
 
+// 检查两条导航速度输入的零速与静默时间，避免旧通道的迟到非零命令进入下一任务。
 bool ChassisControlSubscriber::navigationOutputStopped(
   const std::chrono::steady_clock::time_point since)
 {
@@ -51,6 +54,7 @@ bool ChassisControlSubscriber::navigationOutputStopped(
   return since + quiet <= now;
 }
 
+// 按通道记录接收状态，将当前选中通道的有限速度与接收时的跟踪代次一起缓存。
 void ChassisControlSubscriber::onNavigationVelocity(
   const int source, const geometry_msgs::msg::Twist & message)
 {
@@ -79,7 +83,7 @@ void ChassisControlSubscriber::onNavigationVelocity(
   }
 }
 
-// 调用方已持 mutex_。已取消路径的迟到 Twist 在订阅回调中丢弃，不作为后续任务的缓存。
+// 每周期按发布者冲突、反馈质量、交接、遥控与导航的顺序仲裁最终输出，遥控超时沿既定速度规划减速。
 void ChassisControlSubscriber::processUnifiedCommand()
 {
   const auto now = std::chrono::steady_clock::now();

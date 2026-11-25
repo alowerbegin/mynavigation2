@@ -1,5 +1,4 @@
-// 底盘远程支路的接口与单轴 S 曲线实现。速度单位为 m/s、rad/s，加速度和 jerk 分别再除以秒及秒²。
-// SCurvePlanner 只推进数值状态；fixed_path 由 ChassisControlSubscriber 仲裁并统一输出，其他模式保留原独立支路。
+// 定义底盘遥控、双导航速度输入和统一输出的仲裁接口。控制权、接收时间与任务代次共同决定每周期可发送的指令。
 
 #ifndef NAV2_REGULATED_MODULES__CHASSIS_CONTROL_SUBSCRIBER_HPP_
 #define NAV2_REGULATED_MODULES__CHASSIS_CONTROL_SUBSCRIBER_HPP_
@@ -23,9 +22,8 @@ namespace nav2_regulated_modules
 // 对单轴速度按加速度与加加速度约束渐变；线速度和角速度各使用一个实例。
 class SCurvePlanner {
 public:
-    // dt 为控制周期；sm 为速度上限，后续四项分别限制正常加速与减速的幅值和变化率。
-    // dt 为积分周期 s，sm 为速度幅值，正常加／减速分别提供加速度及 jerk 上限；调用方保证约束有效。
-    // 紧急约束固定初始化为 8，但 update 会按运动阶段重选正常约束，不能据此宣称全程执行紧急上限。
+    // dt 为积分周期秒数，sm 为速度幅值，后续参数给出正常加／减速度和 jerk 上限。
+    // 构造时保存约束并清零运动状态，实际每周期约束由 update 按运动阶段选择。
     SCurvePlanner(double dt, double sm, 
                   double norm_accel_amax, double norm_accel_jmax, 
                   double norm_decel_amax, double norm_decel_jmax)
@@ -46,16 +44,14 @@ public:
         d_  = 0.0;
     }
 
-    // 以当前速度初始化 S 曲线，并清零加速度；用于切换控制阶段。
-    // 用实测速度初始化 sc_ 并清零 ac_；当前实现不在此重置其他历史量，不能视为完整 reset。
+    // 用实测速度重置 sc_ 并清零 ac_，其他历史量按原状态保留。
     void init(double sc){
         sc_ = sc;
         ac_ = 0.0;
     }
 
-    // 设置目标速度方向和加减速约束；速度反向时先收敛到零。
-    // sm 的符号是目标方向，绝对值作为幅值；反向请求先把 d_ 置零，让现有速度先减下来。
-    // am 和 emrgstate 更新本次约束选择，update 中还会按实际加／减速阶段选择正常约束。
+    // sm 提供目标方向和速度幅值，反向请求先将 d_ 置零以减速。
+    // am 与 emrgstate 更新候选约束，每周期再按实际加速或减速阶段选取上限。
     void setDirection(double sm, double am, bool emrgstate = false) {
         if(std::abs(sm) < 1e-3){
             d_ = 0.0;
@@ -79,9 +75,8 @@ public:
         }
     }
 
-    // 每周期推进一次 S 曲线状态，并返回新的目标速度。
-    // 一次推进 dt_ 秒：先选加／减速 jerk，再积分加速度并限幅，最后以梯形积分得到速度。
-    // 速度变化≈(旧加速度＋新加速度)×dt_÷2；周期起始已到目标时清零导数，末尾越界则先钳速度，下一周期再清导数。
+    // 每次推进 dt_ 秒，选择 jerk 后积分并限制加速度，再用梯形积分更新速度。
+    // 周期起始达到目标时清零导数，积分越界时先钳制速度，下一周期再清理导数。
     double update() {
         // vg 是带方向目标速度，sc_ 是当前规划速度；两者差值不等于实测跟踪误差。
         double vg = d_ * sm_;
@@ -245,8 +240,9 @@ class ChassisControlSubscriber
   void deactivate();
   // 使支路 inactive、清理目标与反馈快照；本函数不取消定时器也不发布零速。
   void reset();
-  // 遥控占用／交接中拒绝新路径；空闲起步必须有新鲜停稳反馈及下游终态。
+  // 检查统一出口是否唯一、遥控是否释放及交接是否完成，已有导航允许合法的新路径请求抢占。
   bool canStartNavigation();
+  // 检查两条导航速度输入的零速与静默时间，避免旧通道的迟到非零命令进入下一任务。
   bool navigationOutputStopped(std::chrono::steady_clock::time_point since);
 
 private:
@@ -258,6 +254,7 @@ private:
     REMOTE,
     STOPPING
   };
+  // 按通道记录接收状态，将当前选中通道的有限速度与接收时的跟踪代次一起缓存。
   void onNavigationVelocity(int source, const geometry_msgs::msg::Twist & message);
   struct ChannelVelocity
   {
@@ -269,8 +266,11 @@ private:
   int cached_navigation_source_ = -1;
   uint64_t cached_navigation_generation_ = 0;
   rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr lattice_navigation_subscription_;
+  // 每周期按发布者冲突、反馈质量、交接、遥控与导航的顺序仲裁最终输出，遥控超时沿既定速度规划减速。
   void processUnifiedCommand();
+  // 以单调接收时间判断底盘反馈的新鲜度，避免 ROS 时间变化干扰控制权接管条件。
   bool motionFresh(const MotionStateSnapshot & state) const;
+  // 在反馈新鲜的前提下同时要求线速度与角速度低于停稳阈值。
   bool motionStopped(const MotionStateSnapshot & state) const;
   void publishOutput(double linear_velocity, double angular_velocity);
   Authority authority_{Authority::IDLE};

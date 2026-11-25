@@ -1,4 +1,4 @@
-// 仅 autonomous_fixed 使用：一次 Hybrid A*，冻结前消除格心偏差；不追加连接线或重新搜索。
+// 保留的 Hybrid A* 包装规划器，搜索后对整条路径作有界端点平移并重新检查足迹。当前统一入口选择 Lattice 包装器。
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -47,7 +47,7 @@ public:
     {
       throw nav2_core::PlannerException("Same-cell hybrid result has no translation segment for precise arrival");
     }
-    // Rigid translation preserves curvature, yaw, path length and every direction-change cusp.
+    // 此处先对整条路径作等量平移，保留这一阶段的相对几何，后续再处理起点残差和末端航向。
     for (auto & pose : plan.poses)
     {
       pose.pose.position.x += dx;

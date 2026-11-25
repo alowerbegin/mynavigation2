@@ -1,5 +1,4 @@
-// 订阅 /motion_state 并缓存底盘线／角速度。非法速度不会刷新缓存样本的接收时间。
-// 快照读写使用同一互斥锁；过期判定由消费者根据 steady_clock 时间完成，本模块不会定时复制旧消息。
+// 接收并整理底盘 MotionState，拒绝非有限速度，使用互斥锁提供快照及接收时间供控制权判断。
 
 #include "nav2_regulated_modules/motion_state_subscriber.hpp"
 

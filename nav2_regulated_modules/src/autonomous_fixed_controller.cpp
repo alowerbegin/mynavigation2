@@ -1,3 +1,4 @@
+// 实现冻结路径控制包装器，包括暂停恢复、障碍检查、分段切换和终点复核。路径跟踪委托给内嵌 FixedPathController。
 #include "nav2_regulated_modules/autonomous_fixed_controller.hpp"
 #include "nav2_regulated_modules/detail/autonomous_navigation.hpp"
 #include "nav2_core/exceptions.hpp"
@@ -211,6 +212,7 @@ bool AutonomousFixedPathController::isTerminalPositionAccurate()
   return ready_;
 }
 
+// 发布带执行标识的控制阶段状态，供协调器区分当前段心跳与迟到消息。
 void AutonomousFixedPathController::status(const std::string & phase)
 {
   const double time = node_->now().seconds();
@@ -240,6 +242,7 @@ void AutonomousFixedPathController::status(const std::string & phase)
   last_status_time_ = time;
 }
 
+// 将定位失效转换为受控暂停，连续有效样本满足恢复条件后继续本段，持续异常交由超时处理。
 bool AutonomousFixedPathController::pauseForLocalization(const bool valid, const geometry_msgs::msg::PoseStamped & pose, const geometry_msgs::msg::Twist & measured, const double stamp, const double steady_time)
 {
   if (!valid || localization_pause_.paused_since || localization_hard_wait_)
@@ -338,6 +341,7 @@ bool AutonomousFixedPathController::pauseForLocalization(const bool valid, const
   return false;
 }
 
+// 对定位恢复后的指令逐周期限幅，避免暂停前后速度不连续。
 geometry_msgs::msg::Twist AutonomousFixedPathController::limitResumeCommand(const geometry_msgs::msg::Twist & command, const double steady_time)
 {
   if (!resume_ramp_active_)
@@ -366,6 +370,7 @@ geometry_msgs::msg::Twist AutonomousFixedPathController::limitResumeCommand(cons
   return result;
 }
 
+// 记录终点位置、航向、停稳及定位和反馈时间信息，便于逐项复核末端状态。
 void AutonomousFixedPathController::logTerminalReview(const geometry_msgs::msg::PoseStamped & pose, const geometry_msgs::msg::Twist & measured, const double xy, const double yaw, const double xy_tolerance, const bool stationary, const double tf_stamp, const double tf_age, const double odom_age, const double receive_age)
 {
   const double time = node_->now().seconds();
@@ -385,6 +390,7 @@ void AutonomousFixedPathController::logTerminalReview(const geometry_msgs::msg::
   terminal_log_time_ = time;
 }
 
+// 按预测运动检查车体足迹和扫掠区域，覆盖当前命令与制动相关的运动范围。
 bool AutonomousFixedPathController::trajectoryFree(const geometry_msgs::msg::PoseStamped & pose, const geometry_msgs::msg::Twist & measured, const geometry_msgs::msg::Twist & command)
 {
   const auto reject = [&](const std::string & reason, const double x, const double y, const double yaw, const double cost, const int cell_x, const int cell_y, const int center_cost, const double predicted_time)
@@ -452,6 +458,7 @@ bool AutonomousFixedPathController::trajectoryFree(const geometry_msgs::msg::Pos
   return safe;
 }
 
+// 检查末端微调候选位置的几何与成本地图条件。
 bool AutonomousFixedPathController::trimPoseAllowed(const double x, const double y) const
 {
   if (rotation_only_ || path_.poses.size() < 2)
@@ -490,6 +497,7 @@ bool AutonomousFixedPathController::trimPoseAllowed(const double x, const double
   return end_plane && nearest <= std::min(0.02, terminal_capture_margin_);
 }
 
+// 在末端微调阶段生成受限平移或转向命令，结合误差与反馈速度决定动作。
 geometry_msgs::msg::Twist AutonomousFixedPathController::trimCommand(const geometry_msgs::msg::PoseStamped & pose, const geometry_msgs::msg::Twist & measured, const double xy_tolerance)
 {
   geometry_msgs::msg::Twist command;

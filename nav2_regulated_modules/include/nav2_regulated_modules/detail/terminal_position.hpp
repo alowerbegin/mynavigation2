@@ -1,5 +1,4 @@
-// 将“要求停车”与“位置准确”分开的纯位置判据。距离、验收容差和可选停车入口均为 m。
-// 越过终点平面可触发停车，但不能据此证明精度合格；速度停稳和持续时间由调用方及控制服务器另行判断。
+// 提供末端位置及越过终点平面的几何判断，供跟踪器与到点检查器采用一致口径。
 #ifndef NAV2_REGULATED_MODULES__DETAIL__TERMINAL_POSITION_HPP_
 #define NAV2_REGULATED_MODULES__DETAIL__TERMINAL_POSITION_HPP_
 

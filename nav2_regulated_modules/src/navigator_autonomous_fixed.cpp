@@ -1,3 +1,4 @@
+// 管理单次 Lattice 路径的冻结、分段跟踪、定位与障碍暂停、恢复以及终点验收。原路径指纹和游标用于约束恢复。
 #include "nav2_regulated_modules/regulated_navigator.hpp"
 #include "nav2_regulated_modules/navigation_utils.hpp"
 #include "nav2_regulated_modules/detail/autonomous_navigation.hpp"
@@ -5,6 +6,7 @@
 
 namespace nav2_regulated_modules
 {
+// 要求源时间年龄在 −0.05～0.2 秒内，平面线速度≤0.01 m/s、角速度≤0.05 rad/s，且反馈速度均为有限值。
 bool RegulatedNavigator::fixedVelocityStopped()
 {
   std::lock_guard<std::mutex> lock(velocity_mutex_);
@@ -17,6 +19,7 @@ bool RegulatedNavigator::fixedVelocityStopped()
   return age >= -0.05 && age <= 0.2 && std::isfinite(velocity.linear.x) && std::isfinite(velocity.linear.y) && std::isfinite(velocity.angular.z) && std::hypot(velocity.linear.x, velocity.linear.y) <= 0.01 && std::abs(velocity.angular.z) <= 0.05;
 }
 
+// 进入 WAIT_START 并初始化单次规划任务的等待状态，准备定位、旧任务终态和停稳条件。
 void RegulatedNavigator::beginFixedAutonomy()
 {
   frozen_phase_ = "WAIT_START";
@@ -30,6 +33,7 @@ void RegulatedNavigator::beginFixedAutonomy()
   LOG_INFO("自主固定路径任务等待定位、旧执行终态与连续停稳，generation={}", task_.generation);
 }
 
+// 验证规划坐标系及请求目标误差，保存原路径、分段和指纹，随后等待首段执行条件。
 void RegulatedNavigator::freezeAutonomousPath(const nav_msgs::msg::Path & path)
 {
   try
@@ -69,6 +73,7 @@ void RegulatedNavigator::freezeAutonomousPath(const nav_msgs::msg::Path & path)
   }
 }
 
+// 按单调游标截取当前原始路径段，检查偏离距离及旧跟踪终态，再发送带新执行标识的 FollowPath。
 void RegulatedNavigator::followFrozenSegment(const bool resume)
 {
   if (frozen_segments_.empty() || frozen_segment_ >= frozen_segments_.size() || detail::fixedPathFingerprint(frozen_path_) != frozen_fingerprint_)
@@ -111,6 +116,7 @@ void RegulatedNavigator::followFrozenSegment(const bool resume)
   sendFollowPath(subpath);
 }
 
+// 在当前段完成后复核段末位姿与停稳条件，决定切入下一段或完成上层单点 Action。
 void RegulatedNavigator::finishFrozenSegment()
 {
   geometry_msgs::msg::PoseStamped pose;
@@ -144,6 +150,7 @@ void RegulatedNavigator::finishFrozenSegment()
   frozen_stable_since_.reset();
 }
 
+// 解析控制器的执行状态心跳，用任务执行标识过滤旧状态，更新定位暂停和障碍等待依据。
 void RegulatedNavigator::onFixedExecutionStatus(const std_msgs::msg::String::SharedPtr message)
 {
   if (task_.type == TaskType::NONE || !frozen_follow_inflight_)
@@ -188,6 +195,7 @@ void RegulatedNavigator::onFixedExecutionStatus(const std_msgs::msg::String::Sha
   }
 }
 
+// 驱动首次规划、原路径执行和暂停恢复，监控状态心跳、定位质量、障碍等待及无进展超时。
 void RegulatedNavigator::monitorFixedAutonomy()
 {
   const double time = now().seconds();

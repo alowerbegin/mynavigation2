@@ -1,3 +1,4 @@
+<!-- 注册保留的 MPPI 包装控制器与停稳检查器，供显式选择这些插件的配置使用。当前统一入口的半自主通道使用冻结路径控制器。 -->
 <class_libraries>
   <library path="nav2_regulated_modules_autonomous_controller">
     <class type="nav2_regulated_modules::AutonomousMPPIController" base_class_type="nav2_core::Controller">

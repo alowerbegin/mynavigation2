@@ -1,3 +1,5 @@
+# 保留的 autonomous RViz 视图，显示话题按文件中的 Topic 配置解析。当前双通道综合入口采用 unified.rviz。
+
 Panels:
 - Class: rviz_common/Displays
   Help Height: 0
@@ -23,6 +25,7 @@ Panels:
   Splitter Ratio: 0.5
 - Class: nav2_rviz_plugins/Navigation 2
   Name: Navigation 2
+# 全局坐标系、显示项、交互工具和视角设置。
 Visualization Manager:
   Class: ''
   Displays:
@@ -644,6 +647,7 @@ Visualization Manager:
       X: 0
       Y: 0
     Saved: null
+# 窗口位置和尺寸，仅影响本机布局。
 Window Geometry:
   Displays:
     collapsed: false

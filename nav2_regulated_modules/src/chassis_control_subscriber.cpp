@@ -1,5 +1,4 @@
-// 远程 ChassisControl 的事件接收和周期闭环输出。方向字段决定正负，消息速度字段按非负幅值校验。
-// 控制参考来自 MotionState；指令接收时间与反馈接收时间均使用单调时钟，不能与消息 Header 的 ROS 时间混算。
+// 接收 ChassisControl 并维护遥控速度规划器、导航速度缓存和 ControlRes 发布定时器。统一控制权的分支实现在 chassis_control_authority.cpp。
 
 #include "nav2_regulated_modules/chassis_control_subscriber.hpp"
 

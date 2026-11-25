@@ -1,3 +1,4 @@
+// 统计源时间戳、接收间隔、重复和倒退次数及三种时钟下的年龄窗口，供 TF 诊断使用。
 #ifndef NAV2_REGULATED_MODULES__DETAIL__TF_TIMING_HPP_
 #define NAV2_REGULATED_MODULES__DETAIL__TF_TIMING_HPP_
 

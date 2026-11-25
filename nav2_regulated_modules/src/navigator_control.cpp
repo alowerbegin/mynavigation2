@@ -1,5 +1,4 @@
-// FollowPath 下发、反馈转发和速度链观察。每次请求记录任务 generation 与 follow_sequence。
-// 回调必须同时匹配两个标识才能改当前状态；向 cmd_vel_nav 发零速是停车请求，不是轮速停稳确认。
+// 向所选执行通道发送 FollowPath，按任务代次和请求序号过滤响应、反馈与结果，并处理旧请求的取消收口。
 
 #include "nav2_regulated_modules/regulated_navigator.hpp"
 
@@ -151,7 +150,7 @@ void RegulatedNavigator::sendFollowPath(const nav_msgs::msg::Path & path)
 }
 
 // 比较任务代次与跟踪轮次；同一任务换路径也会使旧 sequence 失效。
-// 不能只比较 generation，否则周期重规划的旧跟踪结果可能干扰当前路径。
+// 同一任务可能经历分段或原路径恢复，必须同时核对 follow_sequence，防止旧跟踪结果干扰当前段。
 bool RegulatedNavigator::isCurrentFollow(const uint64_t generation, const uint64_t sequence) const
 {
   return generation == task_.generation && sequence == follow_sequence_;

@@ -1,5 +1,4 @@
-// 规划配置对象：保存 Planner／Smoother 标识、平滑开关、重规划周期与连续失败上限。
-// 频率在 configure 时转换为周期；Action 调度、异步结果和恢复状态由 RegulatedNavigator 管理。
+// 保存规划、平滑和历史重规划配置，当前半自主流程查询 plannerId，其任务调度与一次规划锁存由协调器维护。
 
 #ifndef NAV2_REGULATED_MODULES__PLANNING_MODULE_HPP_
 #define NAV2_REGULATED_MODULES__PLANNING_MODULE_HPP_
@@ -22,7 +21,7 @@ class PlanningModule
   const std::string & smootherId() const;
   // 读取路径几何平滑开关，与底盘速度平滑不是同一个功能。
   bool useSmoother() const;
-  // 返回重规划周期 s，不是频率 Hz；monitorTask 用它比较 elapsed 时间。
+  // 返回按配置频率换算的历史重规划周期，单位为秒；当前单次 Lattice 流程未调用此接口。
   double replanPeriod() const;
   // 返回连续规划失败的允许上限，不是总恢复轮次。
   int maxFailures() const;

@@ -1,3 +1,4 @@
+<!-- 注册保留的 Hybrid A* 包装规划器。当前统一 launch 为半自主通道选择 AutonomousLatticePlanner。 -->
 <library path="nav2_regulated_modules_autonomous_fixed_planner">
   <class name="nav2_regulated_modules::AutonomousFixedHybridPlanner"
          type="nav2_regulated_modules::AutonomousFixedHybridPlanner"

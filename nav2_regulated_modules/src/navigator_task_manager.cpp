@@ -1,5 +1,4 @@
-// 任务结束、抢占、恢复资源与代次清理。子 Goal 的取消请求是异步发送的。
-// 本文件重置句柄或报告上层终态，不等于等待下游取消完成；停车请求和实际停稳需由独立证据区分。
+// 统一完成成功、失败、取消和任务状态清理。子 Action 请求数与新鲜停稳检查由交接监控继续跟踪。
 
 #include "nav2_regulated_modules/regulated_navigator.hpp"
 #include "nav2_regulated_modules/detail/autonomous_navigation.hpp"
@@ -66,6 +65,7 @@ void RegulatedNavigator::cancelTask(const std::string & reason)
   finishCancellation();
 }
 
+// 将已取消任务的上层句柄报告为 CANCELED 或 ABORTED，再清理任务快照。正常激活期间由交接监控调用。
 void RegulatedNavigator::finishCancellation()
 {
   const auto generation = task_.generation;
@@ -138,7 +138,7 @@ void RegulatedNavigator::succeedTask()
 }
 
 // 废弃子 Goal 并向现有上层句柄报告失败，再清理任务快照。
-// 此函数自身没有调用 stopRobot；停车效果不能从函数名或本地状态归零推断。
+// 失败流程请求 stopRobot 并取消子任务，后续启动仍需经过交接监控的请求收口与实测停稳检查。
 void RegulatedNavigator::failTask(const std::string & reason)
 {
   if (((active_pose_goal_ && active_pose_goal_->is_canceling()) ||

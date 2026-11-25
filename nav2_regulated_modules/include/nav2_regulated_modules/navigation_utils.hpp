@@ -1,5 +1,4 @@
-// 导航数据转换与几何小工具。二维距离用 m，航向和角差用 rad，时长输入为秒。
-// 有效 Pose 检查是数值／结构检查，不代表坐标变换存在、定位新鲜或目标可通行。
+// 提供位姿有效性、平面距离、航向及 ROS Duration 换算的公共接口，供任务接收和反馈逻辑复用。
 
 #ifndef NAV2_REGULATED_MODULES__NAVIGATION_UTILS_HPP_
 #define NAV2_REGULATED_MODULES__NAVIGATION_UTILS_HPP_

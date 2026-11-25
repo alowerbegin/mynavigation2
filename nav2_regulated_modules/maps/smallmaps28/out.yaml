@@ -1,6 +1,13 @@
+# 地图服务元数据。image 相对本 YAML 定位，resolution 为米每像素，origin 为地图原点的平面位姿。
+
 image: /userdata/map/pbstream/out.pgm
+# 每像素对应的真实长度，单位为米。
 resolution: 0.030000
+# 图像原点在地图坐标系中的 x、y 和偏航角，长度为米、角度为弧度。
 origin: [-53.159766, -25.225016, 0.0]
+# 是否反转像素明暗到占据概率的映射。
 negate: 0
+# 超过此占据概率的像素判为障碍。
 occupied_thresh: 0.65
+# 低于此占据概率的像素判为空闲，中间区域由地图加载模式解释。
 free_thresh: 0.196

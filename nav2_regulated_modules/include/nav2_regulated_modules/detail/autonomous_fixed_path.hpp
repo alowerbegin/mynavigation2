@@ -1,3 +1,4 @@
+// 冻结路径的分段、指纹和单调游标工具。按运动方向与旋转段拆分原始采样，恢复时保持原路径几何。
 #ifndef NAV2_REGULATED_MODULES__DETAIL__AUTONOMOUS_FIXED_PATH_HPP_
 #define NAV2_REGULATED_MODULES__DETAIL__AUTONOMOUS_FIXED_PATH_HPP_
 
@@ -21,19 +22,19 @@ struct FixedSegment
   bool rotation = false;
 };
 
+// 计算两个路径采样点的二维欧氏距离，单位随路径坐标采用米。
 inline double fixedDistance(const geometry_msgs::msg::PoseStamped & a, const geometry_msgs::msg::PoseStamped & b)
 {
   return std::hypot(a.pose.position.x - b.pose.position.x, a.pose.position.y - b.pose.position.y);
 }
 
+// 将航向误差归一化到函数约定的主值范围，便于比较跨越正负圆周边界的方向。
 inline double fixedAngle(const double value)
 {
   return std::atan2(std::sin(value), std::cos(value));
 }
 
-// 原始姿态编码车头方向；重复位置不能简单删除，否则会丢失原地旋转。
-// rotation_distance 是判为“原地旋转”的最大相邻间距：默认 1e-6 保持原有行为，
-// 状态格路径在 5 cm 网格上可能只留下几毫米位移，由调用方传更大的容差。
+// 用原姿态判断车头方向，按前后向和 rotation_distance 拆段；保留原索引及同位置旋转采样。
 inline std::vector<FixedSegment> splitFixedPath(const nav_msgs::msg::Path & path, const double rotation_distance = 1e-6)
 {
   if (path.header.frame_id.empty() || path.poses.empty())
@@ -104,7 +105,7 @@ inline std::vector<FixedSegment> splitFixedPath(const nav_msgs::msg::Path & path
   return segments;
 }
 
-// FNV-1a 仅用于同任务几何一致性诊断；不包含消息时间戳，不作为安全认证。
+// 按原路径采样位置与姿态生成诊断指纹，供执行和恢复前核对冻结几何，时间戳不纳入几何指纹。
 inline uint64_t fixedPathFingerprint(const nav_msgs::msg::Path & path)
 {
   uint64_t hash = 14695981039346656037ULL;
@@ -130,7 +131,7 @@ inline uint64_t fixedPathFingerprint(const nav_msgs::msg::Path & path)
   return hash;
 }
 
-// 只在当前段、旧进度向前的有限弧长内匹配，避免自交路径跳到后续圈。
+// 在当前段范围内推进原路径游标，游标保持单调，恢复时复用已有采样。
 inline std::size_t advanceFixedCursor(const nav_msgs::msg::Path & path, const FixedSegment & segment, const std::size_t previous, const geometry_msgs::msg::PoseStamped & pose, const double window = 0.5)
 {
   std::size_t best = std::clamp(previous, segment.first, segment.last);

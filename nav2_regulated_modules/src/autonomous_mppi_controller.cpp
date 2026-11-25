@@ -1,3 +1,4 @@
+// 实现保留的 MPPI 旋转包装控制器与停稳到点检查器。当前统一入口的半自主执行配置选择 AutonomousFixedPathController。
 #include "nav2_regulated_modules/autonomous_mppi_controller.hpp"
 
 #include <algorithm>

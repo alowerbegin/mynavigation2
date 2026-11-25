@@ -1,5 +1,4 @@
-// FollowPath 配置快照：集中保存普通导航控制器、目标检查器与无进展超时。
-// 该类不运行控制循环；固定路径任务在协调器中另选专用插件，不能把这里的普通导航标识当作固定路径默认。
+// 保存 FollowPath 的插件 ID 和无进展超时，实际任务的通道与专用插件由协调器选择。
 
 #ifndef NAV2_REGULATED_MODULES__CONTROL_MODULE_HPP_
 #define NAV2_REGULATED_MODULES__CONTROL_MODULE_HPP_

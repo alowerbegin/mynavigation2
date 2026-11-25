@@ -1,3 +1,4 @@
+// 冻结路径定位暂停的纯状态辅助逻辑。用连续有效样本和稳定时长控制恢复，供控制包装器复用和回归检查。
 #ifndef NAV2_REGULATED_MODULES__DETAIL__AUTONOMOUS_FIXED_LOCALIZATION_HPP_
 #define NAV2_REGULATED_MODULES__DETAIL__AUTONOMOUS_FIXED_LOCALIZATION_HPP_
 
@@ -7,7 +8,7 @@
 
 namespace nav2_regulated_modules::detail
 {
-// 只放宽已起步且远离段终点的跟踪；新任务和终点验收不使用延迟窗口。
+// 已初始化且远离段终点时选 tracking_timeout，其余阶段选 strict_timeout；严格距离还覆盖速度与跟踪年龄带来的位移。
 inline double fixedLocalizationTimeout(const bool initialized, const bool terminal, const double goal_distance, const double strict_timeout, const double tracking_timeout, const double terminal_distance, const double maximum_speed, const double capture_margin)
 {
   const double strict_distance = std::max(terminal_distance, maximum_speed * tracking_timeout + capture_margin);

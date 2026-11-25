@@ -1,3 +1,5 @@
+# 保留的 myrviz2 RViz 视图，显示话题按文件中的 Topic 配置解析。当前双通道综合入口采用 unified.rviz。
+
 Panels:
   - Class: rviz_common/Displays
     Help Height: 78
@@ -28,6 +30,7 @@ Panels:
     Name: Time
     SyncMode: 0
     SyncSource: ""
+# 全局坐标系、显示项、交互工具和视角设置。
 Visualization Manager:
   Class: ""
   Displays:
@@ -260,6 +263,7 @@ Visualization Manager:
       Value: Orbit (rviz)
       Yaw: 6.143582820892334
     Saved: ~
+# 窗口位置和尺寸，仅影响本机布局。
 Window Geometry:
   Displays:
     collapsed: false

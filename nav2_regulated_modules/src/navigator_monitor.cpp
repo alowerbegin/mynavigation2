@@ -1,5 +1,4 @@
-// 周期检查任务取消、定位、进度与恢复。ROS 时间用于导航计时，collision 快照内部另用单调接收时间。
-// 固定路径 collision 等待暂停无进展计时，但不关闭取消与定位丢失处理；TF 查询成功不额外证明定位精度。
+// 周期监控任务、生命周期、定位与进度。单点任务交给冻结路径监控，固定路径在需要时沿原路径恢复。
 
 #include "nav2_regulated_modules/regulated_navigator.hpp"
 
@@ -53,7 +52,7 @@ void RegulatedNavigator::startRecovery(const std::string & reason)
   recovery_ready_time_ = now() + rclcpp::Duration::from_seconds(costmap_wait_duration_);
 }
 
-// 依次处理取消、清图等待、TF 丢失／恢复、可选跳变、进度及自主重规划。
+// 依次处理统一交接、取消、冻结路径监控、固定路径恢复、定位与进度检查。
 // collision 仅暂停固定路径无进展计时，不跳过前面的取消与定位处理。
 void RegulatedNavigator::monitorTask()
 {
@@ -85,7 +84,7 @@ void RegulatedNavigator::monitorTask()
   }
   geometry_msgs::msg::PoseStamped current_pose;
   // TF 丢失与位姿突跳分开处理：持续无 TF 必停，突跳检测由独立开关控制。
-  // 自主模式还校验 TF 源时间戳；固定路径保留原先的查询成功计时语义。
+  // 半自主单点的定位时效检查在冻结路径分支处理，此处为固定路径的查询与恢复监控。
   if (!lookupCurrentPose(current_pose))
   {
     if (task_.type == TaskType::TO_POSE)
@@ -171,7 +170,7 @@ void RegulatedNavigator::monitorTask()
 
 }
 
-// 自主模式按源时间戳拒绝过期／未来 TF；固定路径保留原有查询逻辑。
+// 半自主单点任务检查变换源时间的有效年龄，业务固定路径按查询结果更新最后有效时间。
 bool RegulatedNavigator::lookupCurrentPose(geometry_msgs::msg::PoseStamped & pose)
 {
   try
