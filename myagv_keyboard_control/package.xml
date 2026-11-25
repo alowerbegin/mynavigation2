@@ -3,7 +3,7 @@
 <package format="3">
   <name>myagv_keyboard_control</name>
   <version>0.1.0</version>
-  <description>Keyboard control node publishing the MYAGV chassis ControlRes command.</description>
+  <description>Keyboard input publishing ChassisControl targets to the unified navigation arbiter.</description>
   <maintainer email="zpy@example.com">zpy</maintainer>
   <license>Apache-2.0</license>
 

@@ -1187,37 +1187,15 @@ global_costmap:
       # 发布更新时是否总发送整幅代价地图。
       always_send_full_costmap: true
 
-# 保留的独立键盘遥控配置。当前主入口直接接收 ChassisControl，键盘进程需由使用方启动。
+# 与独立键盘包配置保持一致；主入口不自动启动键盘进程。
+# 键盘只设置目标速度和按键有效时间，加减速度与 jerk 由导航器统一配置。
 myagv_keyboard_control:
-  # 该 ROS 节点的参数集合。
   ros__parameters:
-    # 遥控键盘输入设备路径。
     input_device: /dev/tty
-    # 遥控控制命令输出话题。
-    output_topic: /control_to_uart
-    # 遥控命令发布频率，单位 Hz。
-    publish_rate: 100.0
-    # 遥控线速度，单位米每秒。
-    linear_speed: 1.0
-    # 遥控角速度，单位弧度每秒。
-    angular_speed: 0.5
-    max_linear_speed: 0.3  # 遥控线速度上限，单位 m/s。
-    max_angular_speed: 0.3  # 遥控角速度上限，单位 rad/s。
-    # 遥控线加速度上限，单位米每二次方秒。
-    linear_accel_limit: 2.0
-    # 遥控线加加速度上限，单位米每三次方秒。
-    linear_accel_jerk_limit: 4.0
-    # 遥控线减速度上限，单位米每二次方秒。
-    linear_decel_limit: 2.0
-    # 遥控线减速加加速度上限，单位米每三次方秒。
-    linear_decel_jerk_limit: 4.0
-    # 遥控角加速度上限，单位弧度每二次方秒。
-    angular_accel_limit: 1.0
-    # 遥控角加加速度上限，单位弧度每三次方秒。
-    angular_accel_jerk_limit: 2.0
-    # 遥控角减速度上限，单位弧度每二次方秒。
-    angular_decel_limit: 1.5
-    # 遥控角减速加加速度上限，单位弧度每三次方秒。
-    angular_decel_jerk_limit: 3.0
-    # 遥控命令过期阈值，单位秒。
-    command_timeout: 0.10
+    output_topic: /downstream/chassis_control
+    publish_rate: 100.0  # Hz；持续按键时周期发送目标。
+    linear_speed: 0.3  # m/s，前进／后退幅值。
+    angular_speed: 0.3  # rad/s，左转／右转幅值。
+    max_linear_speed: 0.3  # m/s，键盘侧限幅，下游仍有独立限幅。
+    max_angular_speed: 0.3  # rad/s。
+    command_timeout: 0.5  # s，最后一次方向键输入后超时停车；0 表示关闭按键超时。

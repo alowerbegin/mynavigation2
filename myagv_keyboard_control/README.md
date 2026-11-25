@@ -1,177 +1,79 @@
 # myagv_keyboard_control
 
-## 本地源码接口（2026-11-16）
+键盘节点向 `/downstream/chassis_control` 发布 `byd_custom_msgs/msg/ChassisControl` 目标，由统一导航器进行控制权交接、加减速及 jerk 规划，最终由导航器唯一发布 `/control_to_uart`。本节点不再直接发布 ControlRes，也不在本地重复平滑。
 
-直接规控 operation_mode=remote 才启动键盘节点；fixed_path 后台遥控由 /downstream/chassis_control 接入，两个入口不是同一路。键盘直接发 ControlRes，不能与固定路径统一出口并行向同一底盘话题发布。
+## 启动
 
-- 构建声明：[package.xml](package.xml) 、[CMakeLists.txt](CMakeLists.txt) 。
-- CMake 声明的运行目标：`myagv_keyboard_control_node`；具体安装和启动条件见构建文件。
-- 实现定位：[myagv_keyboard_control_node.cpp](src/myagv_keyboard_control_node.cpp) 。
-- 启动资源：[keyboard_control.launch.py](launch/keyboard_control.launch.py) ；启动参数由对应文件声明。
-
-`myagv_keyboard_control` 是 MYAGV 底盘终端键盘直控包。节点按照固定周期直接发布
-`byd_custom_msgs/msg/ControlRes` 到 `/control_to_uart`，接口与 `controlpub` 的最终输出一致。
-按键只改变目标速度，节点按照线速度、角速度及 jerk 限制生成连续的周期输出。
-
-## 一、目录结构
-
-```text
-myagv_keyboard_control/
-├── config/keyboard_control.yaml          # 默认控制参数
-├── launch/keyboard_control.launch.py     # 节点启动入口
-├── src/myagv_keyboard_control_node.cpp   # 键盘读取与周期发布实现
-├── CMakeLists.txt
-└── package.xml
-```
-
-## 补充说明
-
-该包提供终端键盘遥控节点。目录中分别存放 Launch、参数、C++ 控制节点和接口资源。控制节点把方向键转换为目标速度，按照加速度限制逐步逼近实际输出，并发布项目约定的底盘速度消息。
-
-运行方法包括直接启动 Launch、使用真实终端设备路径运行节点，以及通过参数覆盖输入设备、速度、加减速度和松键超时。参数部分说明终端设备、底盘 Topic、发布频率、目标速度和加减速度限制。安全约束包括换向先减速到零、松键超时停车、异常退出恢复终端属性，以及保证底盘速度只有一个最终发布者。
-
-## 二、控制接口
-
-默认输出：
-
-```text
-Topic: /control_to_uart
-Type:  byd_custom_msgs/msg/ControlRes
-Rate:  100Hz
-```
-
-字段定义：
-
-```text
-v           底盘线速度，单位 m/s
-w           底盘角速度，单位 rad/s
-v_lift      固定为 0.0
-w_rotation  固定为 0.0
-```
-
-按键映射：
-
-| 按键 | 功能 | v | w |
-| --- | --- | ---: | ---: |
-| `W` 或 `↑` | 平滑加速前进 | `→ +linear_speed` | `0.0` |
-| `S` 或 `↓` | 平滑加速后退 | `→ -linear_speed` | `0.0` |
-| `A` 或 `←` | 平滑加速原地左转 | `0.0` | `→ +angular_speed` |
-| `D` 或 `→` | 平滑加速原地右转 | `0.0` | `→ -angular_speed` |
-| `Space` 或 `X` | 按减速度限制平滑停车 | `→ 0.0` | `→ 0.0` |
-| `Q` | 立即发布停车指令并退出 | `0.0` | `0.0` |
-
-前进／后退反向、左转／右转反向以及直行／原地转向切换都会先减速到零，再向新方向平滑加速，
-不会跨过零点跳变，也不会在直行与原地转向切换期间同时输出明显的线速度和角速度。
-
-终端不能直接报告按键松开事件。方向按键超过 `command_timeout` 没有再次输入时，节点将其视为
-按键已经松开：目标速度切换为零，当前速度继续按减速度限制平滑下降，直至周期发布停车指令。
-`Q` 和节点安全收口仍立即清零，不经过平滑减速。
-
-## 三、运行方法
-
-以下命令从已构建的 `nav2_ws` 执行。
-
-节点必须在可交互终端中运行。Launch 会把启动 Shell 的实际 `/dev/pts/*` 设备传给节点，
-因此既支持直接运行，也支持从 `nav2_regulated_modules` 的 `remote` 分支启动：
+两个终端均加载同一工作空间，使用相同 ROS_DOMAIN_ID／DDS 设置。
 
 ```bash
 source /opt/ros/humble/setup.bash
+cd /mnt/nvme/codex/nav2_demo/nav2_ws
 source install/local_setup.bash
+ros2 launch nav2_regulated_modules regulated_modules.launch.py
+```
+
+在另一个可交互终端加载同样环境后启动键盘：
+
+```bash
 ros2 launch myagv_keyboard_control keyboard_control.launch.py
 ```
 
-### 实车：从规控入口进入 remote
+键盘 Launch 自动传入当前终端设备，可用 `input_device:=/dev/pts/实际编号` 覆盖；自定义配置使用 `params_file:=/绝对路径/keyboard_control.yaml`。旧 `operation_mode:=remote` 不再启用键盘。主入口不自动启动键盘，也不自动提供定位或实车反馈。
 
-先启动实际底盘通信链，在可交互终端运行以下命令；不要与上面的独立键盘 Launch 同时运行。该模式不启动导航器、地图规划或导航 Action，也不会因 `use_rviz` 的声明默认值而启动导航 RViz：
+## 按键及停车
 
-```bash
-ros2 launch nav2_regulated_modules regulated_modules.launch.py \
-  operation_mode:=remote use_rviz:=false use_sim_time:=false
-```
+| 按键 | op | 目标 |
+|---|---:|---|
+| W／↑ | 0 | 前进，线速度幅值为正 |
+| S／↓ | 1 | 后退，线速度幅值仍为正 |
+| A／← | 2 | 左转，角速度幅值为正 |
+| D／→ | 3 | 右转，角速度幅值仍为正 |
+| X／空格 | 当前合法 op | 三帧零速度请求，随后停止发布 |
+| Q | 当前合法 op | 三帧零速度请求后退出 |
 
-按键与最大速度见上文。无默认交互终端时，可通过规控入口的 `keyboard_input_device:=/dev/pts/实际编号` 指定当前用户拥有的终端，不能照抄其他会话的设备路径。`Q` 会请求零速并退出；实际停止仍须由底盘反馈确认。单独运行键盘包时，覆盖项为其 `input_device`，不是规控入口的参数名。
+启动时、完成停车请求后保持静默，不持续占用遥控。方向键有效期间按100 Hz重复发送目标；超时按与X相同的方式请求停车。终端无法直接识别松键，最后一次方向键后超过0.5秒才判定超时。换向和轴间切换沿用下游现有行为，不在键盘侧另加规划。
 
-### 仿真：场景 remote 的输入协议不同
+零速请求交给下游平滑减速，Q不代表机械急停。Ctrl+C、进程异常或通信断流依靠下游0.15秒指令超时触发停车；该时间不包含实际减速过程。结束遥控后，下游在指令过期且实测停稳后释放控制权，旧导航任务不自动恢复。
 
-当前场景遥控入口为：
+## 键盘参数
 
-```bash
-ros2 launch myworld_bringup entry.launch.py \
-  operation_mode:=remote use_gazebo:=true headless:=true \
-  use_rviz:=false use_sim_time:=false
-```
+默认配置见 [keyboard_control.yaml](config/keyboard_control.yaml) ，参数在启动时读取，修改后重启节点。
 
-该入口只启动仿真和 `/downstream/chassis_control` 的 ChassisControl→Twist 网关，不启动本包键盘节点。本包发布 `/control_to_uart` 的 ControlRes，二者类型与话题都不同；因此不能把启动本包当作已经接通仿真遥控。现有仿真用法是[按场景说明周期发布 ChassisControl](../myworld_bringup/README.md#remote仿真遥控-topic) ，其超时和停车逻辑由场景网关负责。若需键盘驱动该仿真，须另行提供匹配的消息适配，当前入口未提供。
+| 参数 | 默认值 | 作用 |
+|---|---|---|
+| input_device | /dev/tty | Launch自动覆盖为当前交互终端 |
+| output_topic | /downstream/chassis_control | ChassisControl目标输入话题 |
+| publish_rate | 100.0 | 目标发送频率，Hz |
+| linear_speed／max_linear_speed | 0.3／0.3 | 目标线速度／键盘限幅，m/s |
+| angular_speed／max_angular_speed | 0.3／0.3 | 目标角速度／键盘限幅，rad/s |
+| command_timeout | 0.5 | 按键有效时间，s；0关闭按键超时 |
 
-仿真／实车 remote 都不接收导航 Action。若仅需观察已有地图、TF 或雷达，另一个加载同一环境的终端可运行：
+实际目标取速度参数与键盘限幅的较小值。消息 `acceleration=0`，加减速度和jerk统一使用导航器参数。原键盘 `*_accel_limit`、`*_decel_limit`、`*_accel_jerk_limit`、`*_decel_jerk_limit` 已移除，不能再用这些名称调速。
 
-```bash
-rviz2 -d "$(ros2 pkg prefix --share nav2_regulated_modules)/rviz/nav2_default_view.rviz" \
-  --ros-args -p use_sim_time:=false
-```
+## 下游加减速配置
 
-remote 不自动提供地图或定位；对应显示是否可用取决于外部数据。只有全部系统改用仿真时钟且有 `/clock` 时才将 RViz 的时间参数同步为 true，不以运行 Gazebo 为唯一依据。不要用 RViz 导航目标工具控制 remote。
+修改 [regulated_modules.yaml](../nav2_regulated_modules/params/regulated_modules.yaml) 中 `regulated_navigator.ros__parameters` 的以下参数，重新构建安装并重启统一规控入口。键盘的 params_file 只配置键盘节点，不能替代导航器配置。
 
-### 直接运行节点并覆盖参数
+| 约束 | 线速度轴参数／当前值 | 角速度轴参数／当前值 |
+|---|---|---|
+| 默认加速度 | chassis_default_linear_accel_max／1.5 m/s² | chassis_default_angular_accel_max／1.0 rad/s² |
+| 加速度硬上限 | chassis_linear_accel_max／2.0 m/s² | chassis_angular_accel_max／1.5 rad/s² |
+| 减速度上限 | chassis_linear_decel_max／2.0 m/s² | chassis_angular_decel_max／1.5 rad/s² |
+| 加速jerk | chassis_linear_accel_jerk_max／3.0 m/s³ | chassis_angular_accel_jerk_max／3.0 rad/s³ |
+| 减速jerk | chassis_linear_decel_jerk_max／3.0 m/s³ | chassis_angular_decel_jerk_max／3.0 rad/s³ |
 
-以下方式与上述入口互斥：
+本轮保持这些值与下游S曲线算法不变。键盘始终发送acceleration=0，不涉及非零加速度请求的生效行为。
 
-```bash
-ros2 run myagv_keyboard_control myagv_keyboard_control_node --ros-args \
-  -p max_linear_speed:=0.3 \
-  -p max_angular_speed:=0.3 \
-  -p linear_speed:=0.1 \
-  -p angular_speed:=0.3 \
-  -p linear_accel_limit:=0.3 \
-  -p linear_decel_limit:=0.6 \
-  -p command_timeout:=0.8
-```
+导航器需Active且收到新鲜 `/motion_state`，默认反馈超时0.2秒。`/control_to_uart` 应只有导航器一个发布者；不要同时启动旧键盘直控、controlpub等直接底盘输出进程。
 
-## 四、参数
-
-下表为 C++ 节点内置默认值；Launch 加载 [keyboard_control.yaml](config/keyboard_control.yaml) 后，`linear_speed=1.0`、`command_timeout=0.1`，并仍受 `max_linear_speed=0.3` 与 `max_angular_speed=0.3` 限幅。节点直接运行而未传 YAML 时 `command_timeout=0.5`。加速度及角速度另有对应 jerk 参数，见源码声明。
-
-| 参数 | 默认值 | 说明 |
-| --- | ---: | --- |
-| `input_device` | `/dev/tty` | 键盘输入终端；Launch 会自动覆盖为启动 Shell 的 `/dev/pts/*` |
-| `output_topic` | `/control_to_uart` | 底盘控制输出 Topic |
-| `publish_rate` | `100.0` | 周期发布频率，单位 Hz |
-| `linear_speed` | `0.2` | 前进和后退速度绝对值，单位 m/s |
-| `angular_speed` | `0.5` | 左右转角速度绝对值，单位 rad/s |
-| `max_linear_speed` | `0.3` | 遥控线速度上限，单位 m/s，必须为有限正数 |
-| `max_angular_speed` | `0.3` | 遥控角速度上限，单位 rad/s，必须为有限正数 |
-| `linear_accel_limit` | `0.4` | 线速度加速限制，单位 m/s²，必须大于零 |
-| `linear_decel_limit` | `0.8` | 线速度减速限制绝对值，单位 m/s²，必须大于零 |
-| `angular_accel_limit` | `1.0` | 角速度加速限制，单位 rad/s²，必须大于零 |
-| `angular_decel_limit` | `2.0` | 角速度减速限制绝对值，单位 rad/s²，必须大于零 |
-| `command_timeout` | `0.5` | 最后一次方向键输入后的松键判定超时，超时后平滑减速，单位 s；设为 `0.0` 表示关闭超时 |
-
-实际目标速度取原目标参数与对应最大限速的较小值，发布输出也按正负方向限幅。
-加减速时间取决于实际目标速度、加减速度及 Jerk 参数。最大限速在启动时读取，可通过上述终端参数或 YAML 配置覆盖；不支持运行期动态更新。
-
-## 五、安全约束
-
-不要同时运行 `controlpub` 和本节点。两者都会发布 `/control_to_uart`，同时运行会造成底盘控制指令竞争。
-
-`Space`／`X` 和键盘输入超时用于正常平滑停车；需要立即停车并退出时使用 `Q`。节点安全收口仍会
-绕过速度斜坡直接发布零速度。
-
-首次联调应架空驱动轮或断开动力执行机构，先通过以下命令确认字段、符号和频率：
+## 手动核对
 
 ```bash
-ros2 topic echo /control_to_uart
-ros2 topic hz /control_to_uart
+ros2 topic info /downstream/chassis_control --verbose
 ros2 topic info /control_to_uart --verbose
+ros2 topic echo /downstream/chassis_control
+ros2 topic echo /control_to_uart
 ```
 
-## 遥控最大限速配置
-
-三个遥控入口均默认限制为线速度 `0.3 m/s`、角速度 `0.3 rad/s`。参数在启动时读取，显式配置可使用其他有限正数。
-
-| 入口 | 线速度上限参数 | 角速度上限参数 |
-| --- | --- | --- |
-| 本键盘节点 | `max_linear_speed` | `max_angular_speed` |
-| `regulated_navigator` 的 `ChassisControl` | `chassis_linear_speed_max` | `chassis_angular_speed_max` |
-| `chassis_control_to_twist` 仿真适配器 | `max_linear_velocity` | `max_angular_velocity` |
-
-YAML 中将上表参数放在对应节点的 `ros__parameters` 下；直接运行节点时使用 `--ros-args -p 参数名:=值`。修改 Launch 加载的源码 YAML 后需重新构建对应包，使安装配置生效。
+检查启动静默、四方向、重复按键、X／空格／Q、输入超时和Action接管。最终速度的平滑及实际停稳需要同时观察底盘反馈；编译和静态检查不能证明实车效果。
