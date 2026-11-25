@@ -61,6 +61,7 @@ void RegulatedNavigator::freezeAutonomousPath(const nav_msgs::msg::Path & path)
       task_.total_path_length += detail::fixedDistance(path.poses[i - 1], path.poses[i]);
     }
     frozen_path_pub_->publish(frozen_path_);
+    publishPathBoundaries(frozen_path_);
     LOG_INFO("自主全局路径已冻结，generation={}，规划请求=1，fingerprint={}，点数={}，分段={}", task_.generation, frozen_fingerprint_, path.poses.size(), segments.size());
     frozen_phase_ = "WAIT_RESUME";
     frozen_wait_since_ = now().seconds();

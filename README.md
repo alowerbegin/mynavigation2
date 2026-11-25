@@ -232,12 +232,12 @@ FIXTURE
 
 ```bash
 source /opt/ros/humble/setup.bash
-cd /mnt/nvme/codex/nav2_demo/nav2change_ws
+cd /mnt/nvme/codex/nav2_demo/nav2_ws
 source install/local_setup.bash
 ros2 topic info /downstream/chassis_control --verbose
 ```
 
-先确认实际消费者：`unified` 和 `fixed_path` 的 `regulated_navigator` 使用该话题进行后台遥控优先接管，自动取消当前路径并等待下游终态及停稳；需要节点 active 和新鲜 `/motion_state`。场景仿真的 `remote` 由遥控网关接收，直接规控入口的 `remote` 则是键盘直控。其他导航模式保留原独立订阅支路，不能据固定路径的新仲裁规则推断它们也支持相同接管。统一入口的 `/control_to_uart` 应只有导航器一个发布者；额外出口会触发零速保护。
+当前统一入口的 `regulated_navigator` 接收该话题，遥控优先接管正在执行的固定路径或半自主任务，等待旧下游终态与实测停稳后输出遥控目标。接收条件包括节点 active 和新鲜 `/motion_state`，`/control_to_uart` 应只有导航器一个发布者。
 
 | `op` | 操作 | 使用的速度字段 |
 |---|---|---|
@@ -296,27 +296,58 @@ ros2 topic pub --once --qos-reliability reliable --qos-durability volatile \
 
 ## 固定路径 Action 示例
 
-先在当前地图选择可通行的起点与终点，设置 AX、AY、BX、BY，速度幅值用正数。方向 1 前进、2 倒车。
+以下数字取自 2026-11-25 本机后台仿真的实际请求，坐标保留六位小数，使用 `map` 坐标系。先结束上面的遥控发布进程，等待控制权释放与 `/motion_state` 停稳，再发送 Action。固定路径示例对应车辆位于起点附近、车头朝向约 −2.04835 rad 的状态。
+
+| 项目 | 实际数值 |
+|---|---|
+| 起点 | x＝9.004632 m，y＝−4.608506 m |
+| 终点 | x＝8.751848 m，y＝−5.096974 m |
+| 路段长度 | 约 0.55 m |
+| 方向与速度 | `motion_direction=1`，前进 0.15 m/s |
 
 ```bash
 ros2 action send_goal --feedback /navigation_service byd_custom_msgs/action/NavigationService \
-  "{task_id: fixed_demo, navi_segment: [{segment_type: 1, segment_id: line, motion_direction: 1, max_speed: 0.15, node1: {x: ${AX:?先设置起点X}, y: ${AY:?先设置起点Y}}, node2: {x: ${BX:?先设置终点X}, y: ${BY:?先设置终点Y}}}]}"
+'{
+  task_id: fixed_line_demo,
+  navi_segment: [{
+    segment_type: 1,
+    segment_id: line_01,
+    motion_direction: 1,
+    max_speed: 0.15,
+    node1: {x: 9.004632, y: -4.608506, z: 0.0},
+    node2: {x: 8.751848, y: -5.096974, z: 0.0}
+  }]
+}'
 ```
 
-固定路径结束后检查 Action 状态及结果 finish，实际停稳通过运动反馈核对。当前路径字段定义见 [NavigationService.action](byd_custom_msgs/action/NavigationService.action) 与 [NaviSegment.msg](byd_custom_msgs/msg/NaviSegment.msg) 。
+`segment_type=1` 表示直线，路径点的车头航向由路径切线与运动方向生成。收到 `SUCCEEDED` 且结果 `finish=true` 后，再通过运动反馈核对停稳。消息字段见 [NavigationService.action](byd_custom_msgs/action/NavigationService.action) 和 [NaviSegment.msg](byd_custom_msgs/msg/NaviSegment.msg) 。
 
-### 单点到达并停车
+## 半自主 Lattice Action 示例
 
-在同一终端设置 `GOAL_X`、`GOAL_Y` 为当前地图的目标坐标，单位米；终点航向为 0°（车头沿地图 +X 方向）。`--feedback` 持续打印反馈；自主 Action 不包含固定路径的 `navi_segment`、`motion_direction` 或 `max_speed` 字段，速度由控制器及平滑器配置决定。上述单点入口的 `behavior_tree` 均必须留空。
+下面的目标取自同次仿真的半自主到点用例，可在上述固定路径完成并停稳后发送。实测请求时车辆约位于 `(8.754544, -5.091547)`，目标在该车头朝向的后方约 0.55 m。Lattice 根据地图搜索含倒车能力的路径，保留目标车头航向。
+
+| 项目 | 实际数值 |
+|---|---|
+| 目标位置 | x＝9.007079 m，y＝−4.602951 m，z＝0 m |
+| 目标航向 | yaw≈−2.04784 rad |
+| 目标四元数 | x＝0，y＝0，z＝−0.854152901，w＝0.520021943 |
+| Action | `/navigate_to_pose`，`nav2_msgs/action/NavigateToPose` |
 
 ```bash
-: "${GOAL_X:?先设置地图目标X}" "${GOAL_Y:?先设置地图目标Y}"
-ros2 action send_goal --feedback /navigate_to_pose \
-  nav2_msgs/action/NavigateToPose \
-  "{pose: {header: {frame_id: map}, pose: {position: {x: $GOAL_X, y: $GOAL_Y, z: 0.0}, orientation: {x: 0.0, y: 0.0, z: 0.0, w: 1.0}}}, behavior_tree: ''}"
+ros2 action send_goal --feedback /navigate_to_pose nav2_msgs/action/NavigateToPose \
+'{
+  pose: {
+    header: {frame_id: map},
+    pose: {
+      position: {x: 9.007079, y: -4.602951, z: 0.0},
+      orientation: {x: 0.0, y: 0.0, z: -0.854152901, w: 0.520021943}
+    }
+  },
+  behavior_tree: ""
+}'
 ```
 
-修改终点位置时改 `position.x/y`；平面航向通过四元数 `orientation.z/w` 指定，`x/y` 保持 0。例如 90° 使用 `z: 0.7071067811865476, w: 0.7071067811865476`，180° 使用 `z: 1.0, w: 0.0`；不要把角度直接填入 `orientation.z`。
+此 Goal 提供目标位姿，速度采用当前控制器与平滑器配置，`behavior_tree` 保持为空。协调器请求一次 Lattice 规划，冻结结果后按分段路径跟踪；完整路径可在 `/autonomous_fixed/plan` 观察。使用其他地图或其他车辆起点时，需要据实际定位和可通行区域调整这些坐标。
 
 ### 结果判断与取消任务
 

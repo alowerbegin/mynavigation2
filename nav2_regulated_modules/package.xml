@@ -1,8 +1,9 @@
 <?xml version="1.0"?>
-<!-- 声明本包的构建、运行依赖和插件发现入口。lifecycle_msgs 同时用于编译协调器及运行时查询双通道状态。 -->
+
 
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
+  <!-- 声明本包的构建、运行依赖和插件发现入口。lifecycle_msgs 同时用于编译协调器及运行时查询双通道状态。 -->
   <name>nav2_regulated_modules</name>
   <version>0.1.0</version>
   <description>Standalone planning and control bringup package without simulation assets.</description>

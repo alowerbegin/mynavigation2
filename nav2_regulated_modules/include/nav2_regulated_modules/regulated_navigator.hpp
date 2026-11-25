@@ -181,9 +181,11 @@ private:
   // 按任务类别选择控制器与 GoalChecker，再异步发送完整 Path。
   // FollowPath 的响应、反馈和结果均校验 generation／follow_sequence；固定路径绝对限速在接受后发布。
   void sendFollowPath(const nav_msgs::msg::Path & path);
-  // 发布 Path 及左右边界、端点等 Marker，帮助观察固定路径几何。
-  // 边界宽度是显示参数，不是碰撞检测区，也不限制实际行驶误差。
+  // 发布固定路径中心线，并复用共享边界显示。
   void publishFixedPath(const nav_msgs::msg::Path & path);
+  // 为固定路径或半自主冻结路径发布左右边界及采样点，不修改输入路径。
+  // 边界宽度仅供显示，不作为碰撞检测区或实际行驶误差限制。
+  void publishPathBoundaries(const nav_msgs::msg::Path & path);
   // 比较任务代次与跟踪轮次；同一任务换路径也会使旧 sequence 失效。
   // 同一任务可能经历分段或原路径恢复，必须同时核对 follow_sequence，防止旧跟踪结果干扰当前段。
   bool isCurrentFollow(uint64_t generation, uint64_t sequence) const;

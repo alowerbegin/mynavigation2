@@ -282,8 +282,7 @@ void RegulatedNavigator::startFixedPath(
   sendFollowPath(path);
 }
 
-// 发布 Path 及左右边界、端点等 Marker，帮助观察固定路径几何。
-// 边界宽度是显示参数，不是碰撞检测区，也不限制实际行驶误差。
+// 发布固定路径中心线，并复用共享边界显示；更新时间只影响可视化副本。
 void RegulatedNavigator::publishFixedPath(const nav_msgs::msg::Path & path)
 {
   if (!fixed_path_pub_ || !fixed_path_pub_->is_activated() || !fixed_path_boundaries_pub_ || !fixed_path_boundaries_pub_->is_activated())
@@ -303,6 +302,24 @@ void RegulatedNavigator::publishFixedPath(const nav_msgs::msg::Path & path)
     pose.header = visualization_path.header;
   }
   fixed_path_pub_->publish(visualization_path);
+  publishPathBoundaries(visualization_path);
+}
+
+// 复用固定路径的 Marker 命名空间、编号与样式，显示最近发布的整条路径边界。
+// 输入路径保持只读，半自主冻结路径的坐标、时间戳与指纹不受影响。
+void RegulatedNavigator::publishPathBoundaries(const nav_msgs::msg::Path & path)
+{
+  if (!fixed_path_boundaries_pub_ || !fixed_path_boundaries_pub_->is_activated())
+  {
+    LOG_WARN("路径边界发布器未激活，跳过 RViz2 边界发布");
+    return;
+  }
+  if (path.poses.empty())
+  {
+    LOG_WARN("路径为空，跳过 RViz2 边界发布");
+    return;
+  }
+  const auto & visualization_path = path;
   visualization_msgs::msg::MarkerArray boundaries;
   const auto make_line = [&visualization_path](const int id, const double lateral_offset, const double height, const double width, const float red, const float green, const float blue, const float alpha)
   {
@@ -339,6 +356,13 @@ void RegulatedNavigator::publishFixedPath(const nav_msgs::msg::Path & path)
         point.x -= lateral_offset * tangent_y / tangent_length;
         point.y += lateral_offset * tangent_x / tangent_length;
       }
+      else
+      {
+        // 重合点或原地旋转没有有效切线，按该点车头航向生成左右偏移。
+        const double yaw = tf2::getYaw(visualization_path.poses[index].pose.orientation);
+        point.x -= lateral_offset * std::sin(yaw);
+        point.y += lateral_offset * std::cos(yaw);
+      }
       marker.points.push_back(point);
     }
     return marker;
@@ -371,7 +395,7 @@ void RegulatedNavigator::publishFixedPath(const nav_msgs::msg::Path & path)
   }
   boundaries.markers.push_back(std::move(nodes));
   fixed_path_boundaries_pub_->publish(boundaries);
-  LOG_INFO("固定路径与科技风边界已发布到 RViz2，path_topic={}，boundaries_topic={}，frame={}，路径点数={}，左右半宽={:.2f}m", fixed_path_visualization_topic_, fixed_path_boundaries_topic_, visualization_path.header.frame_id, visualization_path.poses.size(), fixed_path_boundary_half_width_);
+  LOG_INFO("路径边界已发布到 RViz2，boundaries_topic={}，frame={}，路径点数={}，左右半宽={:.2f}m", fixed_path_boundaries_topic_, visualization_path.header.frame_id, visualization_path.poses.size(), fixed_path_boundary_half_width_);
 }
 
 // 固定路径恢复复用 active_path，半自主恢复使用冻结路径当前段。
