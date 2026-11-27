@@ -259,12 +259,12 @@ void FixedPathController::setPlan(const nav_msgs::msg::Path & path)
   {
     throw nav2_core::PlannerException("Fixed path has no valid goal tangent");
   }
-  const double start_path_yaw = std::atan2(path.poses[tangent_index].pose.position.y - path.poses.front().pose.position.y, path.poses[tangent_index].pose.position.x - path.poses.front().pose.position.x);
+  const double start_motion_yaw = std::atan2(path.poses[tangent_index].pose.position.y - path.poses.front().pose.position.y, path.poses[tangent_index].pose.position.x - path.poses.front().pose.position.x);
   const double goal_tangent_x = path.poses.back().pose.position.x - path.poses[goal_tangent_index].pose.position.x;
   const double goal_tangent_y = path.poses.back().pose.position.y - path.poses[goal_tangent_index].pose.position.y;
   const double goal_tangent_length = std::hypot(goal_tangent_x, goal_tangent_y);
   const double goal_path_yaw = std::atan2(goal_tangent_y, goal_tangent_x);
-  const double direction_cosine = std::cos(normalizeAngle(poseYaw(path.poses.front()) - start_path_yaw));
+  const double direction_cosine = std::cos(normalizeAngle(poseYaw(path.poses.front()) - start_motion_yaw));
   // 首点车头朝向必须能明确区分沿切线前进还是逆切线倒车，近乎垂直则拒绝。
   if (!std::isfinite(direction_cosine) || std::abs(direction_cosine) < 0.5)
   {
@@ -283,6 +283,10 @@ void FixedPathController::setPlan(const nav_msgs::msg::Path & path)
   goal_tangent_index_ = goal_tangent_index;
   // 车头与起点切线同向记为前进，反向记为倒车；后续速度输出使用此符号。
   direction_sign_ = direction_cosine > 0.0 ? 1 : -1;
+  // 起点对齐使用首点车头朝向，而不是第一个路径节点形成的弦方向；
+  // 倒车段转换为运动方向，保持后续速度符号和横向误差定义不变。
+  const double start_path_yaw = normalizeAngle(
+    poseYaw(path.poses.front()) + (direction_sign_ < 0 ? M_PI : 0.0));
   start_path_yaw_ = start_path_yaw;
   goal_path_yaw_ = goal_path_yaw;
   terminal_tangent_x_ = goal_tangent_x / goal_tangent_length;
