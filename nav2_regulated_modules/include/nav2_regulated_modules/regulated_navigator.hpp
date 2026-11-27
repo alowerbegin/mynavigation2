@@ -335,6 +335,7 @@ private:
   double autonomous_terminal_distance_ = 0.15;
   double localization_recovery_timeout_ { 10.0 };
   double localization_stable_duration_ { 0.5 };
+  double cusp_resume_stable_duration_ { 0.15 };
   int max_recovery_rounds_ { 2 };
   bool check_smoother_collisions_ { true };
   double current_speed_ { 0.0 };

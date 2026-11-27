@@ -164,6 +164,10 @@ nav2_util::CallbackReturn RegulatedNavigator::on_configure(const rclcpp_lifecycl
   progress_min_translation_ = get_parameter("progress_min_translation").as_double();
   localization_recovery_timeout_ = get_parameter("localization_recovery_timeout").as_double();
   localization_stable_duration_ = get_parameter("localization_stable_duration").as_double();
+  if (has_parameter("autonomous_fixed_resume_stable_duration"))
+  {
+    cusp_resume_stable_duration_ = get_parameter("autonomous_fixed_resume_stable_duration").as_double();
+  }
   fixed_path_step_ = get_parameter("fixed_path_step").as_double();
   fixed_path_max_speed_ = get_parameter("fixed_path_max_speed").as_double();
   fixed_path_boundary_half_width_ = get_parameter("fixed_path_boundary_half_width").as_double();

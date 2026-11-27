@@ -273,7 +273,9 @@ void RegulatedNavigator::monitorFixedAutonomy()
       failTask("等待新鲜定位、停稳或旧执行结束超时");
       return;
     }
-    if (!detail::autonomousSettled(localized && fixedVelocityStopped() && frozen_outstanding_follows_ == 0, time, localization_stable_duration_, frozen_stable_since_))
+    const double stable_duration =
+      frozen_segment_ > 0 ? cusp_resume_stable_duration_ : localization_stable_duration_;
+    if (!detail::autonomousSettled(localized && fixedVelocityStopped() && frozen_outstanding_follows_ == 0, time, stable_duration, frozen_stable_since_))
     {
       return;
     }
