@@ -9,6 +9,7 @@
 #include "nav2_regulated_modules/detail/autonomous_fixed_localization.hpp"
 #include "nav2_regulated_modules/detail/autonomous_fixed_terminal_review.hpp"
 #include "nav2_regulated_modules/detail/autonomous_fixed_terminal_trim.hpp"
+#include "nav2_controller/plugins/stopped_goal_checker.hpp"
 #include "nav2_costmap_2d/footprint_collision_checker.hpp"
 #include "nav_msgs/msg/odometry.hpp"
 #include "byd_custom_msgs/msg/motion_state.hpp"
@@ -16,6 +17,11 @@
 
 namespace nav2_regulated_modules
 {
+// 换向段标记类型：行为继承 StoppedGoalChecker，仅用于控制器识别换向段。
+class AutonomousCuspGoalChecker : public nav2_controller::StoppedGoalChecker
+{
+};
+
 // 单向子路径的控制包装；原 FixedPathController 的算法和参数命名空间保持独立。
 class AutonomousFixedPathController : public nav2_core::Controller, public nav2_core::TerminalAwareController
 {
@@ -85,6 +91,8 @@ private:
   double period_ = 0.01;
   double settle_duration_ = 0.5;
   double brake_stable_duration_ = 0.2;
+  double cusp_settle_duration_ = 0.25;
+  double cusp_brake_stable_duration_ = 0.15;
   double terminal_review_timeout_ = 2.0;
   double terminal_capture_margin_ = 0.02;
   double max_angular_ = 0.4;

@@ -3,4 +3,7 @@
   <class name="nav2_regulated_modules::AutonomousFixedPathController" type="nav2_regulated_modules::AutonomousFixedPathController" base_class_type="nav2_core::Controller">
     <description>Single-direction frozen path tracking with strict pose and stopped-velocity acceptance.</description>
   </class>
+  <class name="nav2_regulated_modules::AutonomousCuspGoalChecker" type="nav2_regulated_modules::AutonomousCuspGoalChecker" base_class_type="nav2_core::GoalChecker">
+    <description>Marker goal checker for cusp segments.</description>
+  </class>
 </library>

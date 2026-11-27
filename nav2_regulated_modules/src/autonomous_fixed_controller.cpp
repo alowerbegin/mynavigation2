@@ -33,6 +33,8 @@ void AutonomousFixedPathController::configure(const rclcpp_lifecycle::LifecycleN
   };
   settle_duration_ = parameter("settle_duration", 0.5);
   brake_stable_duration_ = parameter("brake_stable_duration", 0.2);
+  cusp_settle_duration_ = parameter("cusp_settle_duration", 0.25);
+  cusp_brake_stable_duration_ = parameter("cusp_brake_stable_duration", 0.15);
   terminal_review_timeout_ = parameter("terminal_review_timeout", 2.0);
   terminal_capture_margin_ = parameter("terminal_capture_margin", 0.02);
   trim_limits_.max_speed = parameter("terminal_trim_max_speed", 0.02);
@@ -52,6 +54,10 @@ void AutonomousFixedPathController::configure(const rclcpp_lifecycle::LifecycleN
   if (terminal_review_timeout_ <= settle_duration_)
   {
     throw std::invalid_argument("Terminal position review timeout must exceed settle duration");
+  }
+  if (cusp_settle_duration_ > settle_duration_ || cusp_brake_stable_duration_ > brake_stable_duration_)
+  {
+    throw std::invalid_argument("Cusp settle and brake durations must not exceed terminal durations");
   }
   max_angular_ = parameter("max_angular_velocity", 0.4);
   max_accel_ = parameter("max_angular_acceleration", 0.8);
@@ -612,6 +618,9 @@ geometry_msgs::msg::TwistStamped AutonomousFixedPathController::computeVelocityC
   const double yaw_tolerance = tf2::getYaw(tolerance.orientation);
   const double position_tolerance = (rotation_only_ && rotation_position_tolerance_ > 0.0) ? std::max(tolerance.position.x, rotation_position_tolerance_) : tolerance.position.x;
   const bool stationary = std::hypot(measured.linear.x, measured.linear.y) <= stopped.linear.x && std::abs(measured.angular.z) <= stopped.angular.z;
+  const bool cusp_segment = dynamic_cast<const AutonomousCuspGoalChecker *>(checker) != nullptr;
+  const double settle_duration = cusp_segment ? cusp_settle_duration_ : settle_duration_;
+  const double brake_stable_duration = cusp_segment ? cusp_brake_stable_duration_ : brake_stable_duration_;
   detail::FixedSegment segments;
   segments.last = path_.poses.size() - 1;
   segments.rotation = rotation_only_;
@@ -631,7 +640,7 @@ geometry_msgs::msg::TwistStamped AutonomousFixedPathController::computeVelocityC
         status("FAILED");
         throw nav2_core::PlannerException("Autonomous fixed trim capture, corridor, distance or time budget exceeded");
       }
-      if (trim_paused_ && !blocked_ && detail::autonomousSettled(stationary, steady_time, brake_stable_duration_, trim_resume_since_))
+      if (trim_paused_ && !blocked_ && detail::autonomousSettled(stationary, steady_time, brake_stable_duration, trim_resume_since_))
       {
         trim_paused_ = false;
       }
@@ -642,7 +651,7 @@ geometry_msgs::msg::TwistStamped AutonomousFixedPathController::computeVelocityC
     }
     else
     {
-      detail::reviewFixedTerminal(terminal_review_, xy, yaw, stationary, time, position_tolerance, yaw_tolerance, brake_stable_duration_, settle_duration_, terminal_review_timeout_, terminal_capture_margin_);
+      detail::reviewFixedTerminal(terminal_review_, xy, yaw, stationary, time, position_tolerance, yaw_tolerance, brake_stable_duration, settle_duration, terminal_review_timeout_, terminal_capture_margin_);
       if (terminal_review_.phase == detail::FixedReviewPhase::WAIT_POSITION && !rotation_only_ && !blocked_)
       {
         if (!trim_confirm_stamp_)
@@ -732,3 +741,4 @@ geometry_msgs::msg::TwistStamped AutonomousFixedPathController::computeVelocityC
 }
 }
 PLUGINLIB_EXPORT_CLASS(nav2_regulated_modules::AutonomousFixedPathController, nav2_core::Controller)
+PLUGINLIB_EXPORT_CLASS(nav2_regulated_modules::AutonomousCuspGoalChecker, nav2_core::GoalChecker)
