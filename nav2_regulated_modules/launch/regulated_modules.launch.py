@@ -116,13 +116,13 @@ class NavigationRewrittenYaml(RewrittenYaml):
                          autonomous_fixed_terminal_localization_distance=terminal_localization_distance)
         planner = config['planner_server']['ros__parameters']
         # 基元允许倒车：冻结路径按换向切段，段间短拼接残差按旋转段处理。
-        # 内部平滑保持关闭，确保每个采样点保留自身状态格朝向。
+        # 本地设备保留内部平滑开关，首点朝向由 planner 包装层恢复。
         planner['planner_plugins'] = ['SmacLattice']
         planner['selected_planner'] = 'SmacLattice'
         planner.setdefault('SmacLattice', {}).update(
             plugin='nav2_regulated_modules::AutonomousLatticePlanner',
             lattice_filepath=lattice_file, tolerance=endpoint_budget,
-            allow_reverse_expansion=True, max_planning_time=3.5, smooth_path=False)
+            allow_reverse_expansion=True, max_planning_time=3.5, smooth_path=True)
         controller = config['controller_server']['ros__parameters']
         controller.update(controller_frequency=100.0,
                           controller_plugins=['AutonomousFixedPathController'],
@@ -141,7 +141,9 @@ class NavigationRewrittenYaml(RewrittenYaml):
         controller['AutonomousFixedPathController'] = {
             'plugin': 'nav2_regulated_modules::AutonomousFixedPathController',
             'tracker': tracker, 'settle_duration': 0.5,
-            'brake_stable_duration': 0.2, 'terminal_review_timeout': 2.0,
+            'brake_stable_duration': 0.2,
+            'cusp_settle_duration': 0.25, 'cusp_brake_stable_duration': 0.15,
+            'terminal_review_timeout': 2.0,
             'terminal_capture_margin': 0.02,
             'terminal_trim_max_speed': 0.02, 'terminal_trim_max_step': 0.02,
             'terminal_trim_max_distance': 0.03, 'terminal_trim_timeout': 5.0,
@@ -169,6 +171,8 @@ class NavigationRewrittenYaml(RewrittenYaml):
             controller[name] = {'plugin': 'nav2_controller::StoppedGoalChecker', 'stateful': False,
                                 'xy_goal_tolerance': xy, 'yaw_goal_tolerance': yaw,
                                 'trans_stopped_velocity': 0.01, 'rot_stopped_velocity': 0.05}
+        controller['autonomous_fixed_cusp_checker']['plugin'] = (
+            'nav2_regulated_modules::AutonomousCuspGoalChecker')
         controller['progress_checker'].update(plugin='nav2_controller::PoseProgressChecker',
                                                required_movement_radius=0.01,
                                                required_movement_angle=0.05,

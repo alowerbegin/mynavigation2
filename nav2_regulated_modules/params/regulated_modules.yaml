@@ -3,9 +3,9 @@
 # 半自主配置的历史基线，当前 launch 始终选择 Lattice，保留此块的其余可配置项。
 autonomous_fixed_profile:
   ros__parameters:
-    planner: hybrid
+    planner: lattice
     # false 关闭控制器基于 local_costmap 足迹的零速停车判据。
-    obstacle_check_enabled: true
+    obstacle_check_enabled: false
 
 # 规划服务基线，当前仅 lattice_exec 创建规划器进程，并用生成配置选择 SmacLattice。
 planner_server:
@@ -151,15 +151,15 @@ planner_server:
       # 解析扩展尝试间隔系数。
       analytic_expansion_ratio: 3.5
       # 解析扩展最大长度，单位米。
-      analytic_expansion_max_length: 3.0
+      analytic_expansion_max_length: 2.0
       # 倒车轨迹代价系数。
-      reverse_penalty: 1.5
+      reverse_penalty: 2.0
       # 切换行进方向的代价。
       change_penalty: 0.05
       # 前进↔倒车换向的倍率惩罚，1.0 表示不惩罚。
       direction_change_penalty: 3.0
       # 非直线运动代价系数。
-      non_straight_penalty: 1.3
+      non_straight_penalty: 1.5
       # 障碍代价权重。
       cost_penalty: 2.0
       # 原地旋转代价。
@@ -176,6 +176,17 @@ planner_server:
       allow_reverse_expansion: false
       # 是否对规划路径执行平滑。
       smooth_path: true
+      smoother:
+        # 搜索或优化的最大迭代次数。
+        max_iterations: 1000
+        # 平滑项权重。
+        w_smooth: 0.3
+        # 原始路径保真项权重。
+        w_data: 0.2
+        # 规划或平滑允许的误差阈值；具体单位依所属插件。
+        tolerance: 1.0e-10
+        # 是否对平滑结果继续细化。
+        do_refinement: true
 
     # 保留的任意角度 Theta* 规划配置。
     ThetaStar:
