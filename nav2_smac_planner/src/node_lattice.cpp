@@ -281,13 +281,28 @@ float NodeLattice::getTraversalCost(const NodePtr & child)
   MotionPrimitive * transition_prim = child->getMotionPrimitive();
   const float prim_length =
     transition_prim->trajectory_length / motion_table.lattice_metadata.grid_resolution;
-  if (prim == nullptr) {
-    return prim_length;
-  }
 
   // Pure rotation in place 1 angular bin in either direction
   if (transition_prim->trajectory_length < 1e-4) {
-    return motion_table.rotation_penalty * (1.0 + motion_table.cost_penalty * normalized_cost);
+    float rotation_cost =
+      motion_table.rotation_penalty * (1.0 + motion_table.cost_penalty * normalized_cost);
+    // 只降低起点区域连续原地旋转的代价；发生平移后恢复正常旋转代价。
+    bool start_rotation = true;
+    for (NodeLattice * node = this; node->parent != nullptr; node = node->parent) {
+      MotionPrimitive * node_prim = node->getMotionPrimitive();
+      if (node_prim == nullptr || node_prim->trajectory_length >= 1e-4) {
+        start_rotation = false;
+        break;
+      }
+    }
+    if (start_rotation) {
+      rotation_cost *= 0.1f;
+    }
+    return rotation_cost;
+  }
+
+  if (prim == nullptr) {
+    return prim_length;
   }
 
   float travel_cost = 0.0;
